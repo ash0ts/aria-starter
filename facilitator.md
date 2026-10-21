@@ -36,6 +36,28 @@ and [sources.md](sources.md) when making a copy of the starter.
 
 The URL shape and fork workflow come from [marimo's educator guide](https://molab.marimo.io/for-educators).
 
+## Introduce the task before the code
+
+Ask participants to route three fictional messages by hand: “Where is my
+order?”, “How do I return this jacket?”, and “This stove burned my hand.”
+The intended labels are `order_status`, `returns`, and `human_escalation`.
+Discuss ambiguity before presenting any score. The classifier chooses a queue;
+the support agent instead writes an answer using order and policy tools. SFT
+trains a larger classifier, not the agent. These distinctions are repeated in
+each notebook so participants do not need to have read this guide.
+
+Have students open just one notebook. Confirm they can see the data table and
+results or submission form, expand a supplied cell, and locate an **Edit here**
+cell. Explain that a baseline is their reference, a candidate is their changed
+version, and a run records an attempt. Show the dataset split table before
+inviting anyone to add examples.
+
+For the first CPU result, have them read one row aloud: customer message,
+expected queue, predicted queue, and why they disagree. Explain that 12 correct
+predictions out of 16 is 75% accuracy. Macro-F1 gives each of the four queues
+equal weight, so it helps notice a queue whose errors are hidden by a common
+queue's successes. Use the per-label table alongside the overall score.
+
 ## Teach the edit points
 
 Show students how to expand a collapsed cell with **Show code** in the editor.
@@ -101,6 +123,26 @@ sentence. Use the held-out test split only after their last development change.
 Reading test errors makes later edits informed by that test set; explain why
 it no longer provides an independent final assessment. The final discussion
 should include a failure that remained, even if the aggregate score improved.
+
+## Finish with evidence a student can explain
+
+Use the notebook's concrete first edit before proposing broader experiments.
+For CPU, reset `C` to `1.0` and try two-word phrases. For the agent, add the
+missing-order-ID instruction and rerun the same scenarios. For SFT, a two-ticket
+smoke run checks the service path; establish an unchanged full-run baseline
+before drawing conclusions about a full-run variant.
+
+Ask participants to show the baseline and candidate links, point to the exact
+line they changed, and describe one improvement or regression. “The score did
+not change” is a valid finding. Ask which evidence ARIA used and whether the
+student agrees with its explanation. Do not equate a fluent answer with a
+supported explanation.
+
+Demonstrate the [dashboard guide](README.md#find-and-read-your-results): W&B
+runs hold experiment evidence; Agent Lens and W&B's Agents view show agent
+conversations. Ordinary Weave Traces and Evals are not populated by this starter.
+Use the [rehearsal links](validation.md#live-checks) as examples without assuming
+participants can access the validation team's project.
 
 ## Rehearse before inviting a cohort
 

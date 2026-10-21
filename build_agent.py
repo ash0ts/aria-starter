@@ -38,21 +38,137 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    # Build a support assistant
+    # Build the outdoor shop's support assistant
 
-    Trail Supply is a **fictional outdoor shop**. Supplied tools look up orders and policies or simulate an escalation.
-    **Learning objective:** explain a tool-use failure and test whether one prompt edit changes the assistant's behavior.
-    **Prerequisites:** basic Python, a facilitator-provided W&B team/project, your API key, Forge Inference credits,
-    and ARIA access. No existing agent or customer data is needed.
+    You are helping **Trail Supply, a fictional outdoor shop**, answer customer messages. A customer might ask
+    “Where is order TRAIL-1001?” The assistant should look up that exact order and answer from the record.
+    If the customer says only “Where is my order?”, it should ask for the order ID before claiming to know its status.
+    Your first experiment is to make that missing-ID behavior more reliable.
 
-    Follow **run → inspect → ask ARIA → edit → compare**. The tools never change real orders or contact customers.
+    This is an **agent**: a language model can choose a supplied Python function, read its result, and then answer.
+    Those functions are called **tools**. The model already knows how to generate text; this notebook does not train
+    its weights. You change the **prompt** (instructions sent to the model) or a tool's Python behavior instead.
 
-    **Run this first:** if outputs are waiting, open marimo's command palette and choose
-    **Run all stale cells** (or **Re-run all cells**) to initialize the lab. This computes
-    local results and creates forms; uploads and paid work still need their submit buttons.
+    **What you will make:** a baseline run, a changed-prompt run on the same questions, and an explanation of one
+    behavioral difference. The supplied orders, policies, questions, and expected outcomes make this runnable
+    without a business, dataset, or existing agent project. All actions are simulated.
 
-    **Cell labels:** **Edit here** marks Python you can change; **Run this** marks an action or result; **Supplied implementation** marks provided support code. In the editor, expand collapsed cells with **Show code** (the code icon or cell menu). Opening or editing code does not submit paid work. Keep keys in molab Secrets or an ignored `.env`, never in cells.
+    **Before starting:** you need basic Python, a W&B team/project, your API key, Forge Inference access and credits,
+    and ARIA access. Each **Run agent experiment** submission spends inference credits; opening or editing does not.
+
+    ### Open and run this notebook
+
+    If you are in molab, fork this notebook into your own workspace before editing.
+    If you downloaded this `.py` file, open a terminal in its folder and run the command below.
+    [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/)
+    are available if your terminal says `uvx` is not found. The first launch installs the pinned packages.
+
+    ```sh
+    uvx marimo edit --sandbox build_agent.py
+    ```
+
+    This file includes all its data and helpers; you do not need another notebook or a data download.
+    If results or forms are missing, open marimo's command palette and choose **Run all stale cells**
+    (or **Re-run all cells**). That initializes local Python and the forms. Separate submit buttons control uploads and paid work.
+
+    A **cell** is one editable block in the notebook. **Edit here** identifies the blocks for experiments.
+    Click the code, make your change, and run that cell with its play button; dependent results update.
+    **Run this** identifies an action or its output. **Supplied implementation** contains provided helpers:
+    expand a collapsed cell with **Show code** in the cell menu to read the Python.
+    You do not need to edit those helpers for the first exercise.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Connect your own project
+
+    A **W&B project** is the folder on the website that holds your experiments. A **run** is one saved experiment
+    inside it. An **artifact** is a versioned file bundle, such as the data, predictions, and Python used for that run.
+    ARIA can investigate evidence saved in the project; it does not read your unsaved molab edits.
+
+    Ask your facilitator for a W&B **team name**, a **project name just for you**, and access to ARIA.
+    Use your own W&B API key from [W&B authorization](https://wandb.ai/authorize).
+    In molab, open the notebook's **Secrets** panel and add these three names:
+
+    | Secret name | What to put in it |
+    | --- | --- |
+    | `WANDB_ENTITY` | Your facilitator's team name |
+    | `WANDB_PROJECT` | Your assigned project name |
+    | `WANDB_API_KEY` | Your own API key |
+
+    Locally, create a file named `.env` beside the notebook with `NAME=value` on each line for those three names.
+    Keep that file out of Git and never paste its contents into a notebook cell, ARIA prompt, or screenshot.
+    Restart the notebook after adding credentials. The project must allow your account to log runs;
+    ARIA access also needs to be enabled by your organization. If a page says you lack access, ask your facilitator
+    about that project rather than creating a different personal project.
+
+    [ARIA setup requirements](https://docs.coreweave.com/products/aria) explain the account prerequisites.
+
+    ## Follow one customer question through the system
+
+    For the supplied “Where is order TRAIL-1001?” question, the expected path is:
+
+    1. Python sends the prompt and customer question to **Forge Inference**, which runs the language model.
+    2. The model requests `lookup_order(order_id="TRAIL-1001")`.
+    3. Python runs that tool against the supplied dictionary. It returns the shipped Ridge daypack and its ETA.
+    4. The model sees the tool result and writes an answer. Python checks its structured outcome and tool behavior.
+    5. W&B stores the experiment's settings and scores. **Agent Lens** stores the conversation and its model/tool steps.
+
+    Calling the model to get an answer is **inference**. A **trace** is the recorded sequence of steps for a question;
+    it helps you see why an answer happened. ARIA investigates that recorded evidence after the run.
+
+    ### What the assistant is allowed to know and do
+
+    | Supplied tool | Input | Result |
+    | --- | --- | --- |
+    | `lookup_order` | An order ID supplied by the customer | That order's record, or an unknown-order error |
+    | `lookup_policy` | A policy topic such as `returns` | The shop's written policy |
+    | `escalate_to_human` | A reason for the handoff | A simulated escalation receipt; no person is contacted |
+
+    Order lookup is not a search for any plausible order: it must use the customer's ID.
+    Return decisions need the order and return policy. Safety or explicit requests for human help should not be
+    answered with an invented resolution. For the first experiment, concentrate on missing IDs; keep other behavior fixed.
+
+    The first two scenarios are a known order and a missing order ID. **Questions = 2** runs those two in that order.
+    Using 6 runs all supplied scenarios, including returns and safety checks. Choose the same count for baseline and candidate.
+    A **scenario** is a prepared customer question plus an answer key describing the behavior to check.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(AGENT_SCENARIOS, ORDERS, STORE_POLICY, mo):
+    mo.vstack(
+        [
+            mo.md(
+                "### Inspect what is supplied before calling a model\nThese records are already in this file. Read the first two questions and open the orders/policy if you want to check what a correct answer can claim."
+            ),
+            mo.ui.table(
+                [
+                    {
+                        "scenario": row["id"],
+                        "customer_question": row["message"],
+                        "expected_outcome": row["expected_outcome"],
+                        "required_tools": row["expected_tools"],
+                    }
+                    for row in AGENT_SCENARIOS[:2]
+                ],
+                selection=None,
+            ),
+            mo.accordion(
+                {
+                    "Fictional order records": mo.ui.table(
+                        [{"order_id": key, **value} for key, value in ORDERS.items()],
+                        selection=None,
+                    ),
+                    "Fictional shop policies": mo.json(STORE_POLICY),
+                }
+            ),
+        ]
+    )
     return
 
 
@@ -67,6 +183,10 @@ def _(mo):
 
     The response must be a JSON object with `outcome` and `answer`. `outcome` is one of the four values below;
     `answer` is the customer-facing reply. This **response contract** lets the scorer compare structured behavior.
+    For example, `{"outcome": "ask_order_id", "answer": "What is your order ID?"}`
+    says both what happened and what the customer sees. JSON is just a structured way to store those two fields.
+    `order_status` means a tracking answer, `ask_order_id` asks for the missing identifier,
+    `return_eligible` says the return meets the policy, and `human_escalation` hands off to a person.
     A valid JSON answer can still mislead a customer, so read the answer as well as its score.
     """)
     return
@@ -89,9 +209,12 @@ def _(mo):
     mo.md("""
     ## 2. Edit here: inference settings
 
-    `model` must be available in your Forge Inference catalog. `temperature` (0–1) controls sampling variation;
+    `model` selects which hosted language model answers; it must be available to your Forge account.
+    `temperature` (0–1) controls how much the model varies its word choices;
     keep it at 0 for the first comparison. `max_steps` (1–4) bounds model calls per question, including tool requests.
-    `max_tokens` (64–512) caps each response; too small a value can truncate the JSON answer.
+    `max_tokens` (64–512) caps each response. A token is a small piece of text, often part of a word.
+    Too small a limit can cut off the JSON answer before it finishes. A model/tool round trip needs another step
+    for the model to read the tool result and answer; `max_steps=1` often stops before that answer.
     These limits bound one submission, not repeated experiments. Keep them fixed for the first prompt experiment.
     """)
     return
@@ -107,6 +230,24 @@ def _():
         "max_tokens": 512,
     }
     return (AGENT_CONFIG,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Your first baseline run
+
+    Leave `AGENT_PROMPT` and `AGENT_CONFIG` as supplied for now. In the form below:
+
+    1. Enter your team and assigned project. These must match the project your facilitator enabled.
+    2. Keep **Experiment name** as `baseline` and **Questions** as `2` for the first small run.
+    3. Click **Run agent experiment** once. Wait for its status and two result rows.
+    4. Keep the W&B run link. A status of `finished` means the requests completed, not that the answers passed.
+
+    Every submission is a new paid experiment. If a request fails, inspect the saved run ID and error first;
+    clicking the button again is a deliberate new attempt. Missing model access or credits needs your facilitator's help.
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -194,7 +335,7 @@ def _(get_experiments, get_status, json, mo):
     for _run in _runs:
         _sections.append(
             mo.md(
-                f"### {_run['variant']}\n[W&B run]({_run['run_url']}) · [Agent Lens]({_run['agent_lens_url']})"
+                f"### {_run['variant']}\n[W&B run]({_run['run_url']}) · [Agent Lens]({_run['agent_lens_url']}) · [Weave Agents]({_run['project_url']}/weave/agents)"
             )
         )
         if _run.get("message"):
@@ -206,6 +347,13 @@ def _(get_experiments, get_status, json, mo):
                     kind="warn",
                 )
             )
+        _sections.append(
+            mo.md(
+                f"**Completed questions:** {len(_run['rows'])}/{_run['config']['examples']}. "
+                f"**Passed contracts:** {sum(row['passed'] for row in _run['rows'])}/{_run['config']['examples']}. "
+                "Check the table for which questions failed; unfinished questions are not successful answers."
+            )
+        )
         _sections.append(mo.ui.table(_run["rows"], selection=None))
     if _runs:
         _latest = _runs[-1]
@@ -247,20 +395,63 @@ def _(get_experiments, get_status, json, mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    ## 5. Ask ARIA, edit, and compare
+    ### Read the result and open the dashboards
 
-    **Investigate:** after the baseline, choose the missing-order scenario and inspect its outcome, tool calls,
-    and customer answer. Copy the handoff above into Ask ARIA in the target project. Ask it to explain one failure
-    using the saved `experiment.py`, configuration, and trace.
+    Each row below the run link belongs to one question. `scenario` identifies the test, `expected` is the
+    answer key, `outcome` is what the model returned, and `passed` says whether all automated checks passed.
+    Open the row's `tools` data to inspect names, arguments, and returned records; read `answer` for the customer-facing text.
+    An `error` such as `step_limit` means the agent did not complete normally within its bounds.
 
-    **Change:** write a one-sentence hypothesis about what the assistant should do when an order ID is absent.
-    Edit **AGENT_PROMPT** in section 1. Keep **AGENT_CONFIG** and the scenario count unchanged.
-    Return to **Run this: baseline or candidate**, name the next run `candidate`, and click **Run agent experiment**.
-    Editing or rerunning a code cell alone never sends requests.
+    Use the **W&B run** link for saved settings and the evidence artifact. Its `results.json` contains all scored rows;
+    `config.json` and `experiment.py` show the exact choices for that run. `contract_pass_rate` is the fraction of
+    submitted scenarios that passed every check, not a rating of the prose quality.
 
-    **Compare:** check the same missing-order example in both runs, the contract pass rate, and regressions on other
-    scenarios. Ask ARIA with the updated handoff: “Does this evidence support my hypothesis? Did the assistant invent
-    an ID, escalate unnecessarily, or give a worse answer elsewhere?” Keep both result links and your hypothesis.
+    Use the **Agent Lens** link for the actual conversations. Match a row's `conversation_id` with the conversation
+    in the dashboard's **Conversations** view. Open it and read the **Thread** for the conversation,
+    then **Spans** for individual model/tool operations. A span is one timed operation in the trace.
+    [Agent Lens navigation guide](https://docs.coreweave.com/products/agent-lens/conversations/view-activity)
+    describes these views. Read the customer message, tool arguments/results, and final answer.
+    For a missing ID, a lookup using an invented ID is the specific behavior to investigate.
+
+    The notebook uses the Forge SDK's Agent Lens tracing. These conversations are not ordinary Weave Calls or
+    `weave.Evaluation` runs; an empty Weave Calls/Evaluations page does not mean this agent failed to log.
+    The **Weave Agents** link opens these conversations within the W&B project. For this lab, compare scores in W&B and inspect behavior in Agent Lens or that Agents view. A separate Weave integration is not required.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 5. Ask ARIA, make a prompt edit, and compare
+
+    **Investigate the baseline.** Read the missing-ID row and its Agent Lens conversation. Was an order lookup attempted?
+    Did the assistant invent an ID, ask the customer for it, or escalate? Open **Ask ARIA** from the linked W&B project
+    and paste the handoff above. Add: “Focus on the missing-ID scenario. Show the tool arguments that explain its result.
+    Explain the failure in plain language before proposing a prompt change.” If it already passed, say so: test whether
+    an explicit instruction preserves that behavior and avoids regressions elsewhere.
+
+    **Make a prediction before editing:** “Explicitly asking for a missing order ID will prevent invented order lookups.”
+    Return to **AGENT_PROMPT** in section 1 and add this sentence inside its triple-quoted text:
+
+    ```text
+    For order tracking, if the customer has not supplied an order ID, do not call tools or guess an ID. Ask for the order ID and use the ask_order_id outcome.
+    ```
+
+    Keep the existing JSON instructions. Run the edited cell. This changes the instructions for the next submission;
+    it does not call Forge by itself. Keep `AGENT_CONFIG` and **Questions** unchanged.
+    Return to section 3, name the next experiment `candidate-missing-id`, and click **Run agent experiment** once.
+
+    **Compare the two runs.** Find the missing-ID scenario in both result tables. Check the outcome and tool calls,
+    then check the known-order question still works. If you used all six scenarios, inspect returns and safety too.
+    A better result on one question can cause a worse result on another; that is a **regression**.
+
+    Use the updated handoff in ARIA: “My hypothesis was __. Compare the baseline and candidate on the same questions.
+    Did the missing-ID behavior change? What regressed? Cite the conversations and saved prompt, and tell me what
+    this small experiment can and cannot establish.” Read the customer answers yourself as well.
+
+    You are done with the first exercise when you can explain one behavior, the instruction you changed,
+    and the result. Save the edited notebook and both run links. Only then try the optional tools below.
     """)
     return
 

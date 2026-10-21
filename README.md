@@ -11,6 +11,36 @@ existing ML project or dataset.
 | Build a support assistant with Forge Inference and Agent Lens | [Open agent](https://molab.marimo.io/github/ash0ts/aria-starter/blob/main/build_agent.py) | [build_agent.py](build_agent.py) | The prompt, order and policy tools, or escalation behavior |
 | Fine-tune a language model with Forge serverless training | [Open fine-tuning](https://molab.marimo.io/github/ash0ts/aria-starter/blob/main/finetune_classifier.py) | [finetune_classifier.py](finetune_classifier.py) | Examples or training settings, then compare against the CPU classifier |
 
+## Your job at Trail Supply
+
+Trail Supply is a fictional outdoor shop. Its support desk has two different
+jobs: route incoming messages to the right team, and answer customers using
+order records and store policy.
+
+The **classifier** handles routing. For example, “Where is my order?” should
+receive the label `order_status`, while a report of an unsafe product should
+receive `human_escalation`. It predicts one of four queue names, not a customer
+reply. The CPU lab teaches a small model using 32 labeled tickets, then checks
+it on 16 development tickets that it has not learned from. Another 16 tickets
+are reserved for the final test. Start here if these terms are new to you.
+
+The **agent** writes a reply. It can call supplied Python functions to look up
+an order, read a policy, or simulate asking a human for help. For example, a
+tracking question without an order ID should make it ask for that ID before
+looking anything up. You change its instructions and inspect the sequence of
+model and tool calls to see whether it followed them.
+
+The optional **fine-tuning** lab teaches a pretrained language model the same
+four classification labels as the CPU lab. It creates a new saved model version,
+called a checkpoint. This is a separate activity; it does not train the support
+agent. Start it only after your facilitator has checked training and checkpoint
+serving for your account.
+
+Each notebook explains its task, defines the terms it uses, shows example data,
+and walks through a first experiment. You can use any one file independently.
+ARIA helps explain the evidence you upload and suggest a change. You make the
+change in Python and decide whether the next result supports it.
+
 All tickets, orders, policies, and customers are synthetic. The agent's tools
 simulate support actions; they do not contact customers or change real orders.
 
@@ -119,6 +149,27 @@ HTTP 500 errors while serving the checkpoint comparison. The notebook calls out
 this limitation before submission. See the [validation record](validation.md);
 inspect incomplete runs and recover their status before asking ARIA about model
 quality or choosing a paid retry.
+
+## Find and read your results
+
+A **project** groups your experiments. A **run** records one attempt with its
+settings and scores. An **artifact** is a saved file bundle, such as the input
+data, predictions, source code, or trained model. Each notebook displays links
+for the project and runs it actually created. Those are the links to use with
+ARIA; it cannot see an unsaved edit in your molab tab.
+
+| Where to look | What to inspect |
+| --- | --- |
+| CPU run in W&B | In **Charts**, compare `dev/accuracy` and `dev/macro_f1`. In **Artifacts**, open the saved evidence and find one ticket's expected label and prediction. **Overview** contains the run configuration. |
+| Agent run in W&B | Read the saved results for `passed`, `expected`, `outcome`, and the tools used. A finished run can still contain failed support scenarios. |
+| Agent Lens → Conversations | Open a conversation ID from the notebook. In **Thread**, read the customer's request, tool arguments/results, and reply. In **Spans**, inspect the underlying model/tool calls. |
+| W&B → Agents | This is the project's Weave Agents view of the agent conversations. The starter does not create separate legacy Weave Calls or Weave evaluation runs; an empty Traces/Evals page is not evidence that the Agent Lens upload failed. |
+| SFT training and comparison runs in W&B | Read the saved training status and checkpoint ID first. Only a complete comparison supports comparing `cpu`, `step0`, and `trained` scores. A run labeled Finished by W&B can still hold an `incomplete` comparison record. |
+
+The [validation record](validation.md#live-checks) links to our actual rehearsal
+runs and conversations, with their observed results. These links require access
+to the validation team; your own notebook creates equivalent links in your
+assigned project.
 
 ## Keep your work
 

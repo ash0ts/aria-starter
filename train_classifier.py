@@ -66,20 +66,82 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    # Train a support-ticket classifier
+    # Route support tickets for an outdoor shop
 
-    Trail Supply is a **fictional outdoor shop** with supplied synthetic tickets.
-    **Learning objective:** explain a classification error, make one Python change, and judge its effect.
-    **Prerequisites:** basic Python; no account, GPU, or existing ML project needed for the CPU experiment.
-    Uploads and ARIA require your facilitator's W&B team, your own project, API key, and ARIA access.
+    You have joined the support desk at **Trail Supply, a fictional outdoor shop**. Customers send messages about
+    late deliveries, returns, and products. Staff first need to decide which queue should handle each message.
+    A **ticket** is one customer message. A **label** is its correct queue. A **classifier** is a program that predicts
+    a label from the message. In this lab it chooses a queue; it does not write a reply to the customer.
 
-    Follow **run → inspect → ask ARIA → edit → compare**. Improvement is an experimental outcome, not a promise.
+    Your job is to train a small classifier, find a ticket it routes incorrectly, and test one change.
+    The dataset and working code are supplied. You need to be comfortable editing a Python dictionary or list;
+    you do not need an ML project, GPU, API key, or previous machine-learning experience to start.
 
-    **Run this first:** if outputs are waiting, open marimo's command palette and choose
-    **Run all stale cells** (or **Re-run all cells**) to initialize the lab. This computes
-    local results and creates forms; uploads and paid work still need their submit buttons.
+    **What you will make:** a baseline/candidate comparison, one explained mistake, and a short account of whether
+    your change helped. The CPU experiment is free to run locally. Uploading its evidence enables the ARIA part.
+    Complete sections 1–5 before using the final test in section 6.
 
-    **Cell labels:** **Edit here** marks Python you can change; **Run this** marks an action or result; **Supplied implementation** marks provided support code. In the editor, expand collapsed cells with **Show code** (the code icon or cell menu). Opening or editing code does not submit paid work. Keep keys in molab Secrets or an ignored `.env`, never in cells.
+    ### Open and run this notebook
+
+    If you are in molab, fork this notebook into your own workspace before editing.
+    If you downloaded this `.py` file, open a terminal in its folder and run the command below.
+    [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/)
+    are available if your terminal says `uvx` is not found. The first launch installs the pinned packages.
+
+    ```sh
+    uvx marimo edit --sandbox train_classifier.py
+    ```
+
+    This file includes all its data and helpers; you do not need another notebook or a data download.
+    If results or forms are missing, open marimo's command palette and choose **Run all stale cells**
+    (or **Re-run all cells**). That initializes local Python and the forms. Separate submit buttons control uploads and paid work.
+
+    A **cell** is one editable block in the notebook. **Edit here** identifies the blocks for experiments.
+    Click the code, make your change, and run that cell with its play button; dependent results update.
+    **Run this** identifies an action or its output. **Supplied implementation** contains provided helpers:
+    expand a collapsed cell with **Show code** in the cell menu to read the Python.
+    You do not need to edit those helpers for the first exercise.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## The task you are teaching the classifier
+
+    | Queue name in Python | What belongs here | Fictional example |
+    | --- | --- | --- |
+    | `order_status` | Tracking, dispatch, or delivery of a purchase | “Where is my order? Please send a tracking link.” |
+    | `returns` | Returning an item, refunds, or exchanges | “How do I return this jacket?” |
+    | `product_question` | Features, sizing, or availability before buying | “Is this backpack waterproof?” |
+    | `human_escalation` | Safety, fraud, privacy, or an explicit request for a person | “Please let me speak to a human.” |
+
+    Read each message and decide its queue yourself. For example, “Where is my order?” should go to `order_status`.
+    The supplied labels are the answer key used to check the program. A wrong prediction means the program disagreed
+    with that key; if the key itself seems ambiguous, record that before trying to improve the model.
+
+    We split the 64 supplied tickets into three groups:
+
+    | Split | Tickets | What you use it for |
+    | --- | --- | --- |
+    | Training | 32 | Examples the model learns from |
+    | Development (`dev`) | 16 | Unseen examples you inspect while choosing changes |
+    | Test | 16 | A final check after you stop choosing changes |
+
+    Each pair of related phrasings stays in one split. Otherwise a model could see almost the same question in training
+    and evaluation, making the score look better than its ability to handle a new situation.
+    Do not move a hard development ticket into training just to make it pass.
+
+    ### How the supplied Python learns
+
+    The first step, **TF-IDF**, turns a ticket into numbers describing which words occur and how distinctive they are
+    among the training tickets. The second, **logistic regression**, learns which word patterns tend to go with each queue.
+    Despite its name, logistic regression here chooses a category. `fit` learns from labeled examples;
+    `predict` applies what was learned to other messages. Neither step calls a language-model service.
+
+    A **baseline** is the unchanged reference model. A **candidate** is the version whose settings you can change.
+    Both predict the same development tickets, so a score difference can be traced to the choices you changed.
     """)
     return
 
@@ -118,7 +180,7 @@ def _(mo):
     into `CANDIDATE_CONFIG`, then change **only** `ngram_range` to `(1, 2)`. Leave extra examples empty.
 
     - `ngram_range=(1, 1)` counts single words; `(1, 2)` also counts phrases such as “return window”.
-    - `C` controls how freely the classifier fits the training data. A larger value weakens regularization and can overfit.
+    - `C` controls how freely the classifier fits the training data. Regularization discourages overly specific word rules. A larger `C` weakens that restraint: it can fit training examples more closely but do worse on new messages (overfitting).
     - `class_weight=None` weights examples equally. `"balanced"` gives more weight to less frequent training labels.
 
     Change one choice at a time so you can explain the difference. CPU results recompute automatically when you run an edited cell; uploading is a separate action.
@@ -163,15 +225,28 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    ## 3. Run this: inspect development results
+    ## 3. Run this: read your first result
 
-    Both models train automatically on the training split and predict the same development tickets.
-    **Accuracy** is the fraction of correct predictions. **Macro-F1** averages the four labels' F1 scores,
-    giving each label equal weight; F1 balances finding a label's tickets with avoiding false matches.
-    A **confusion matrix** shows which expected labels were predicted as another label.
+    Initialization fits both models and fills the table below. If it is empty, run all stale cells.
+    The table has one row for `baseline` and one for `candidate`. Keep this first result as your reference.
+    With the supplied data and defaults, both currently get 12 of 16 development tickets right: accuracy `0.75`
+    and macro-F1 about `0.7431`. Equal scores are a valid result; changing a setting need not help.
 
-    Open **Baseline mistakes** and choose one ticket. Read its text, expected label, and predicted label.
-    Check that the intended label makes sense before changing the model.
+    **Accuracy** is correct predictions divided by all predictions: 12 ÷ 16 = 0.75.
+    It is useful, but a model could do well on a common queue and ignore a rare one.
+    **Macro-F1** checks each queue separately and averages their scores equally. For each queue, F1 balances
+    “of the tickets sent here, how many belong here?” with “of the tickets that belong here, how many did we find?”
+    Both scores range from 0 to 1; higher is better on these examples.
+
+    1. Expand **Baseline mistakes**. Pick one row and read its `text`.
+    2. Compare `label` (the supplied answer key) with `prediction` (the model's choice).
+    3. Write down the ticket ID and why you think it belongs to the expected queue.
+    4. Find the same ticket under **Candidate mistakes**. Its absence means the candidate got it right;
+       its presence means it is still wrong.
+
+    The **per-class scores** give each queue its own precision, recall, and F1. The **confusion matrix** groups
+    all predictions: rows are expected queues and columns are predicted queues. Off-diagonal counts are mistakes.
+    Start with one ticket before interpreting the whole matrix.
     """)
     return
 
@@ -219,6 +294,70 @@ def _(baseline_dev, candidate_dev, experiment_id, mo):
             ),
         ]
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(baseline_dev, mo):
+    _mistake = next(
+        (row for row in baseline_dev["predictions"] if not row["correct"]), None
+    )
+    if _mistake is not None:
+        mo.output.append(
+            mo.md(f"""
+        ### Work through one actual mistake
+
+        Ticket **`{_mistake["id"]}`** says: **{_mistake["text"]}**
+
+        The supplied queue is **`{_mistake["label"]}`**, but the baseline chose
+        **`{_mistake["prediction"]}`**. This is one of the mistakes counted in its score.
+        Before asking ARIA, explain in your own words why the supplied queue makes sense.
+        The result alone does not tell us which words caused the mistake; ask ARIA to inspect
+        the saved training data and modeling code rather than guessing a cause from the score.
+
+        You can use this ticket ID in the investigation prompt in section 5.
+        """)
+        )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Connect your own project
+
+    A **W&B project** is the folder on the website that holds your experiments. A **run** is one saved experiment
+    inside it. An **artifact** is a versioned file bundle, such as the data, predictions, and Python used for that run.
+    ARIA can investigate evidence saved in the project; it does not read your unsaved molab edits.
+
+    Ask your facilitator for a W&B **team name**, a **project name just for you**, and access to ARIA.
+    Use your own W&B API key from [W&B authorization](https://wandb.ai/authorize).
+    In molab, open the notebook's **Secrets** panel and add these three names:
+
+    | Secret name | What to put in it |
+    | --- | --- |
+    | `WANDB_ENTITY` | Your facilitator's team name |
+    | `WANDB_PROJECT` | Your assigned project name |
+    | `WANDB_API_KEY` | Your own API key |
+
+    Locally, create a file named `.env` beside the notebook with `NAME=value` on each line for those three names.
+    Keep that file out of Git and never paste its contents into a notebook cell, ARIA prompt, or screenshot.
+    Restart the notebook after adding credentials. The project must allow your account to log runs;
+    ARIA access also needs to be enabled by your organization. If a page says you lack access, ask your facilitator
+    about that project rather than creating a different personal project.
+
+    [ARIA setup requirements](https://docs.coreweave.com/products/aria) explain the account prerequisites.
+
+    ### Where your results will appear
+
+    Use **Upload comparison to W&B** below only when you are ready to save the current comparison.
+    It creates two runs and returns clickable links. Open a run to inspect its **Overview** (including configuration), summary scores,
+    and **Artifacts** (saved data, source, model, and predictions). In the project workspace, select the baseline
+    and candidate to compare `dev/accuracy` and `dev/macro_f1`. Exact failures are in the saved prediction evidence.
+
+    This CPU lab has no language-model conversation or tool calls, so its evidence belongs in W&B runs and artifacts.
+    It does not create Agent Lens conversations or Weave evaluation traces. No paid training is launched by this upload.
+    """)
     return
 
 
@@ -353,23 +492,37 @@ Explain one confusion, suggest one small code or training-data edit and why it m
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    ## 5. Ask ARIA, change, and compare
+    ## 5. Use ARIA to investigate, then run one controlled edit
 
-    **Investigate:** after uploading, open Ask ARIA from the linked project and use the copyable prompt above.
-    Ask: “Which training evidence explains this development mistake? Point to the ticket and saved settings.”
-    If the upload is incomplete, inspect its existing run IDs and resolve access/upload errors before asking about quality.
+    **First, investigate.** Wait for the upload to say **complete**. Open one of the returned run links, go to that
+    project, and select **Ask ARIA**. Copy the handoff text above; it contains the run links and evidence.
+    Add: “Focus on ticket [the ID you chose]. Explain why it may be confused with the other queue.
+    Use the saved training examples and settings. I am new to ML; explain any terms before suggesting one change.”
+    If the upload failed, fix that first; ARIA cannot inspect evidence that never arrived.
 
-    **Change:** write one sentence: “Adding two-word phrases will help distinguish ___ because ___.”
-    Revisit **Edit here: candidate settings**, copy baseline settings, and change only `ngram_range`.
-    Run that cell; CPU fitting and development results recompute automatically. Keep the extra-examples list empty.
-    Click **Upload comparison to W&B** again to save the new evidence; editing alone does not upload it.
+    **Next, state a hypothesis.** A hypothesis is a prediction you can check. For this first experiment, try:
+    “Using two-word phrases will help the classifier distinguish messages whose individual words occur in several queues.”
+    You are testing that idea, not assuming it is true. Keep the original upload links for comparison.
 
-    **Compare:** inspect the targeted ticket, accuracy, macro-F1, and newly wrong tickets. Paste the updated handoff
-    and your hypothesis into ARIA: “Compare these baseline and candidate runs. Did the targeted ticket change,
-    what regressed, and does this evidence support my hypothesis?” Retain both upload links if comparing iterations.
-    A higher aggregate score can hide a worse answer on the ticket you cared about.
+    Return to **Edit here: candidate settings** and replace the dictionary with this exact first experiment:
 
-    Repeat on development examples. Change examples or class weights only in a later, separate experiment.
+    ```python
+    CANDIDATE_CONFIG = {"ngram_range": (1, 2), "C": 1.0, "class_weight": None}
+    ```
+
+    The baseline uses `(1, 1)`, so only phrase length now differs between the models. Leave
+    `EXTRA_TRAINING_EXAMPLES = []`. Run the edited cell with its play button and return to section 3.
+    CPU fitting and predictions update locally. Click **Upload comparison to W&B** again to save this new version;
+    a local edit alone is invisible to ARIA.
+
+    **Finally, compare.** Read the targeted ticket, the two aggregate scores, and any newly wrong tickets.
+    Use the new handoff in ARIA and include your hypothesis: “Did this change fix the targeted mistake?
+    Which examples regressed? Do these runs support my hypothesis, or is the result inconclusive?”
+    If nothing changes, that is evidence too. Do not add test examples or change a second setting to manufacture a win.
+
+    For a second experiment, change only one of `C`, class weighting, or extra training examples.
+    A useful finish is a sentence such as: “I changed __ because __; ticket __ changed from __ to __;
+    the score changed from __ to __, but __ still failed.” Save your edited notebook and run links.
     """)
     return
 

@@ -75,22 +75,144 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    # Fine-tune a support-ticket classifier
+    # Teach a language model to route support tickets
 
-    **Learning objective:** compare a CPU classifier, an untrained language-model checkpoint, and a trained checkpoint
-    on the same synthetic Trail Supply tickets. A **checkpoint** is a saved version of model weights: step 0 is before
-    training; the later step contains the training update.
-    **Prerequisites:** basic Python, your facilitator's W&B team/project and API key, Forge serverless training access
-    and credits, and ARIA access. Try the CPU lab first to learn the labels and error analysis.
+    **Trail Supply is a fictional outdoor shop.** Customers ask about deliveries, returns, and products; staff need
+    to route each message to the right queue. A **ticket** is one customer message, and its **label** is the queue
+    that should receive it. This notebook teaches a language model to output a queue name, not a customer reply.
+    You can start here without having run either other notebook: all data and the CPU reference are included.
 
-    Follow **run → inspect → ask ARIA → edit → compare**. A training job finishing does not guarantee improved predictions.
+    A language model has already learned general text patterns. **Supervised fine-tuning (SFT)** shows it examples
+    of the answers we want and updates its internal weights (the numbers controlling its predictions).
+    This differs from editing a prompt, which changes instructions without changing those weights.
+    We will compare the same model before and after that update, alongside a small local classifier.
 
-    **Run this first:** if outputs are waiting, open marimo's command palette and choose
-    **Run all stale cells** (or **Re-run all cells**) to initialize the lab. This computes
-    local results and creates forms; uploads and paid work still need their submit buttons.
+    **What you will make:** one training job and a separate comparison of three classifiers on the same questions.
+    The first small **smoke run** checks whether the services work. It is not enough data to judge which model is better.
+    A full exercise uses the supplied training split after the smoke path works.
 
-    **Cell labels:** **Edit here** marks Python you can change; **Run this** marks an action or result; **Supplied implementation** marks provided support code. In the editor, expand collapsed cells with **Show code** (the code icon or cell menu). Opening or editing code does not submit paid work. Keep keys in molab Secrets or an ignored `.env`, never in cells.
+    **Before starting:** you need basic Python, your W&B team/project and API key, Forge serverless training access
+    and credits, and ARIA access. Both training and model comparison use paid services and have separate submit buttons.
+    Do the CPU notebook instead if those accounts are not ready; nothing in this file requires its output.
+
+    ### Open and run this notebook
+
+    If you are in molab, fork this notebook into your own workspace before editing.
+    If you downloaded this `.py` file, open a terminal in its folder and run the command below.
+    [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/)
+    are available if your terminal says `uvx` is not found. The first launch installs the pinned packages.
+
+    ```sh
+    uvx marimo edit --sandbox finetune_classifier.py
+    ```
+
+    This file includes all its data and helpers; you do not need another notebook or a data download.
+    If results or forms are missing, open marimo's command palette and choose **Run all stale cells**
+    (or **Re-run all cells**). That initializes local Python and the forms. Separate submit buttons control uploads and paid work.
+
+    A **cell** is one editable block in the notebook. **Edit here** identifies the blocks for experiments.
+    Click the code, make your change, and run that cell with its play button; dependent results update.
+    **Run this** identifies an action or its output. **Supplied implementation** contains provided helpers:
+    expand a collapsed cell with **Show code** in the cell menu to read the Python.
+    You do not need to edit those helpers for the first exercise.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Connect your own project
+
+    A **W&B project** is the folder on the website that holds your experiments. A **run** is one saved experiment
+    inside it. An **artifact** is a versioned file bundle, such as the data, predictions, and Python used for that run.
+    ARIA can investigate evidence saved in the project; it does not read your unsaved molab edits.
+
+    Ask your facilitator for a W&B **team name**, a **project name just for you**, and access to ARIA.
+    Use your own W&B API key from [W&B authorization](https://wandb.ai/authorize).
+    In molab, open the notebook's **Secrets** panel and add these three names:
+
+    | Secret name | What to put in it |
+    | --- | --- |
+    | `WANDB_ENTITY` | Your facilitator's team name |
+    | `WANDB_PROJECT` | Your assigned project name |
+    | `WANDB_API_KEY` | Your own API key |
+
+    Locally, create a file named `.env` beside the notebook with `NAME=value` on each line for those three names.
+    Keep that file out of Git and never paste its contents into a notebook cell, ARIA prompt, or screenshot.
+    Restart the notebook after adding credentials. The project must allow your account to log runs;
+    ARIA access also needs to be enabled by your organization. If a page says you lack access, ask your facilitator
+    about that project rather than creating a different personal project.
+
+    [ARIA setup requirements](https://docs.coreweave.com/products/aria) explain the account prerequisites.
+
+    ## Understand the training task before submitting a job
+
+    | Queue name in Python | What belongs here | Fictional example |
+    | --- | --- | --- |
+    | `order_status` | Tracking, dispatch, or delivery of a purchase | “Where is my order? Please send a tracking link.” |
+    | `returns` | Returning an item, refunds, or exchanges | “How do I return this jacket?” |
+    | `product_question` | Features, sizing, or availability before buying | “Is this backpack waterproof?” |
+    | `human_escalation` | Safety, fraud, privacy, or an explicit request for a person | “Please let me speak to a human.” |
+
+    All examples are synthetic. Of the 64 tickets, 32 are training examples, 16 are **development** examples for
+    choosing changes, and 16 are **test** examples reserved for your final assessment. Related phrasings stay together
+    in one split. Repeatedly editing until test examples pass makes them part of your development process.
+
+    For training, each labeled ticket becomes a short conversation:
+
+    ```text
+    system: Choose exactly one of the four queue labels.
+    user: Where is my order? Please send a tracking link.
+    assistant: order_status
+    ```
+
+    `system` contains the instructions, `user` the input ticket, and `assistant` the desired answer. The upload stores
+    one such record on each line of a **JSONL** file. Python prepares that file for you; you do not need to upload data
+    manually or write JSON. At evaluation time, the expected answer is withheld and the model generates its own label.
+
+    ### The three models in your comparison
+
+    | Result name | How it gets its predictions | What it helps you check |
+    | --- | --- | --- |
+    | `cpu` | A local TF-IDF/logistic-regression classifier learns word patterns from all 32 training tickets | Whether a simpler, cheaper model already handles the task |
+    | `step0` | The pretrained language model follows your prompt before this shop's fine-tuning | What the starting model already knows |
+    | `trained` | The same language model after seeing the selected training tickets | What changed after the training update |
+
+    A **checkpoint** is a saved version of the model's weights. Step 0 is already pretrained; it is not random or
+    trained from scratch. A later step is a saved update. A completed job produces that checkpoint, but you still
+    need a separate inference comparison to find out what it predicts.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(LABELS, TICKETS, mo):
+    mo.vstack(
+        [
+            mo.md(
+                "### Preview the supplied training data\nRead a few tickets and their `label` values. `id` identifies an example; `family` groups related phrasings. The trainer will build the upload from these rows."
+            ),
+            mo.ui.table(
+                [
+                    {
+                        "label": label,
+                        "training_tickets": sum(
+                            row["split"] == "train" and row["label"] == label
+                            for row in TICKETS
+                        ),
+                    }
+                    for label in LABELS
+                ],
+                selection=None,
+            ),
+            mo.ui.table(
+                [row for row in TICKETS if row["split"] == "train"],
+                selection=None,
+                page_size=8,
+            ),
+        ]
+    )
     return
 
 
@@ -127,7 +249,7 @@ def _(mo):
 
     - `base_model` selects the starting model; your team needs access to it. The default can be supplied through `FORGE_TRAINING_MODEL`.
     - `learning_rate` controls the size of weight updates. Larger updates can learn faster or damage useful behavior. Allowed: `1e-6` to `1e-3`.
-    - `batch_size` is the number of examples in a training batch. Allowed: `2`, `4`, or `8`. Change it separately from learning rate.
+    - `batch_size` is the number of examples the trainer groups for one update. Allowed: `2`, `4`, or `8`. Change it separately from learning rate.
 
     The submitted configuration is saved with the prompt and data. Recovery and checkpoint comparison use those saved
     values even if you later edit this cell. The exercise stays at **one pass** through at most **32 training tickets**.
@@ -155,7 +277,7 @@ def _(mo):
 
     The recorded live rehearsal completed training but the full checkpoint comparison encountered intermittent
     Forge HTTP 500 serving errors. This lab does **not** resolve that service issue. A complete training job is not
-    proof that both checkpoints can currently serve predictions. See `validation.md` in the repository for the evidence.
+    proof that both checkpoints can currently serve predictions. See the [validation record](https://github.com/ash0ts/aria-starter/blob/main/validation.md) for the evidence.
     If serving fails, read the existing job status and consult your facilitator before spending credits on a retry;
     do not train another model just to repair an inference error.
     """)
@@ -165,6 +287,28 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(SFT_CONFIG, mo):
     mo.md(f"**Selected training settings:** `{SFT_CONFIG}`")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Make the first run a connection check
+
+    Keep the prompt and `SFT_CONFIG` unchanged. In the next form, keep **Smoke: 2 tickets** and the generated
+    **Experiment ID**. Copy that ID somewhere before clicking **Submit paid training** once.
+    The ID names this deliberate training attempt; it is also how you find it after closing the notebook.
+
+    The smoke job uses the first two training tickets for one pass. **One pass** means each selected example is used
+    once in the uploaded training sequence. Full mode uses all 32 training tickets, also for one pass.
+    A **batch** groups examples for an update; the **learning rate** sets the update size. Leave these alone until
+    you have a complete baseline comparison to investigate.
+
+    The form below starts training only. It does not automatically run paid comparison requests.
+    When training returns, read **Status**. `complete` with a `trained_step` greater than zero means a checkpoint is recorded.
+    If the status is `training`, `needs_recovery`, or `checkpoint_pending`, use recovery below with the same ID.
+    Do not create a new training ID simply because a page stopped waiting.
+    """)
     return
 
 
@@ -233,7 +377,7 @@ async def _(
     mo.vstack(
         [
             mo.md(
-                f"**Status:** {training_result['status']}  \nExperiment: `{training_result['experiment_id']}`"
+                f"**Status:** {training_result['status']}  \nExperiment: `{training_result['experiment_id']}`\n\n[Open the W&B training record]({training_result.get('run_url', '')}). Save this link and experiment ID for recovery."
             ),
             mo.json(training_result),
         ]
@@ -269,8 +413,35 @@ def _(mo, suggested_experiment_id):
 async def _(mo, recover_experiment, recovery_form):
     mo.stop(recovery_form.value is None)
     recovered_result = await recover_experiment(recovery_form.value["experiment_id"])
-    mo.json(recovered_result)
+    mo.vstack(
+        [
+            mo.md(
+                f"**Recovered status:** {recovered_result['status']}. [W&B training record]({recovered_result.get('run_url', '')}). This read did not start new training."
+            ),
+            mo.json(recovered_result),
+        ]
+    )
     return (recovered_result,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Find the training evidence and recover safely
+
+    The training result includes `run_url`, `experiment_id`, `job_id`, `model_id`, and checkpoint names.
+    `run_url` opens the W&B record; its input artifact contains `train.jsonl`, the dataset, and experiment source.
+    Keep the experiment ID and link. The large JSON result is a saved receipt, not Python you need to edit.
+
+    If the notebook closes or a request times out, paste the **original experiment ID** into **Read existing job status**.
+    It reads the existing remote job and updates the receipt. It never starts another training job.
+    If the status says `rejected`, inspect permissions/model access/credits with your facilitator.
+    If no job ID was received, the submission's outcome may be uncertain; inspect the existing run before trying a new ID.
+
+    Only proceed to comparison when the receipt says `complete` and shows a trained checkpoint.
+    Changing `SFT_CONFIG` later does not change this saved model. A different training experiment requires a new ID.
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -281,6 +452,9 @@ def _(mo):
     **Accuracy** is the fraction of correct labels. **Macro-F1** gives each of the four labels equal weight;
     F1 balances finding that label's tickets with avoiding false matches. A **confusion matrix** shows expected
     labels in rows and predictions in columns. Invalid model outputs count as failures.
+    For example, getting 12 out of 16 tickets right gives accuracy 0.75. Macro-F1 prevents a common queue
+    from hiding a neglected queue: it scores each queue's ability to find its tickets without misrouting
+    others, then averages those four scores. Both metrics range from 0 to 1. Check individual tickets too.
     Compare identical tickets across all three models and read individual predictions before drawing conclusions.
     """)
     return
@@ -291,6 +465,11 @@ def _(mo, suggested_experiment_id, uuid):
     evaluation_form = (
         mo.md("""
     ## 4. Run this: compare on development tickets
+
+    Copy the successful training **Experiment ID** into **Completed experiment ID**.
+    Keep the generated **Evaluation ID** and the split `dev`. Click **Submit paid comparison** once.
+    The evaluation ID names this inference attempt; it is different from the training ID.
+    If you typed a custom training ID, replace the form's suggested ID with that exact value.
 
     Smoke evaluation uses the same two development tickets for all three models.
     Both smoke tickets are order-status questions. Macro-F1 still averages all
@@ -398,6 +577,32 @@ async def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
+    ### Read the comparison before asking for a change
+
+    A completed comparison has three rows: `cpu`, `step0`, and `trained`. Expand a model's prediction table and
+    read the same ticket across all three. `label` is the supplied label, `prediction` is the answer returned,
+    and `correct` is whether they match. An explanation such as “This is an order-status question” is not the exact
+    label `order_status`; it counts as invalid even if its meaning is understandable.
+
+    Smoke uses two `order_status` questions. Even if both are correct, macro-F1 is only 0.25 because this calculation
+    averages four labels and the other three have no examples. That is a property of this connection check,
+    not evidence the model failed three queues. Full mode evaluates all 16 development tickets across all labels.
+
+    If only the CPU or step-0 row is present, the comparison is incomplete. A serving error is not a wrong prediction.
+    Use the status and existing job record to diagnose it; do not claim the missing trained model is better or worse.
+    After your facilitator resolves access/serving, a new evaluation ID explicitly retries inference against the same
+    training experiment. It does not require training again.
+
+    The **Evaluation run** link below opens W&B. Inspect its saved settings and the results artifact for raw outputs
+    and scores. This notebook records W&B runs and artifacts; it does not create Agent Lens conversations or Weave
+    agent/evaluation traces. ARIA should be given the training and evaluation run evidence.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
     ## 5. Inspect and ask ARIA
 
     After a completed development comparison, open one model's prediction table and
@@ -472,7 +677,10 @@ def _(mo):
     ARIA to point to the prompt, prediction, and saved training configuration. Smoke scores are only a connection check.
     For incomplete runs, use **Read existing job status** and the recovery guidance before requesting model-quality advice.
 
-    **Change:** state a one-sentence hypothesis. Edit **CLASSIFIER_PROMPT** or one value in **SFT_CONFIG**;
+    **Change:** state a one-sentence hypothesis. For example, “Explicitly telling the model that safety reports
+    require `human_escalation` will reduce safety tickets routed to `returns`.” Only try that hypothesis if the
+    development evidence shows that confusion. Add the instruction inside **CLASSIFIER_PROMPT**, or test one
+    value in **SFT_CONFIG** for a separate experiment;
     hold the other settings, mode, and evaluation split constant. Return to section 3, enter a **new experiment ID**,
     and click **Submit paid training**. After training completes, enter that ID and a **new evaluation ID** in section 4
     and click **Submit paid comparison** with `dev`. An edit or reuse of an existing ID cannot submit a second training job.
@@ -480,6 +688,11 @@ def _(mo):
     **Compare:** give ARIA both training/evaluation IDs and your hypothesis. Ask: “Did the targeted example change?
     Compare macro-F1, accuracy, invalid labels, and regressions on shared tickets. Does the evidence support my hypothesis?”
     The copyable prompt describes the current evaluation; keep the previous run link to compare iterations.
+
+    **Moving from smoke to a learning exercise:** once smoke training and comparison both complete, select
+    **Full: 32 tickets** with a new training ID and keep the original prompt/settings. This becomes your full-mode
+    baseline. Its comparison uses 16 development tickets per model. Make your next prompt/configuration change
+    against that full baseline, also in full mode, so training size is not another changing factor.
 
     ## 7. Final held-out test
 

@@ -1,9 +1,9 @@
 # Validation record
 
-Guided-lab changes checked on 2026-10-21 with Python 3.12.13 and the dependencies
-recorded in each notebook's PEP 723 metadata and adjacent lockfile. Live checks
-below were recorded on 2026-10-20, before the guided-lab changes. This is an
-engineering rehearsal, not a completed student pilot.
+Self-contained lab explanations and live checks were verified on 2026-10-21
+with Python 3.12.13 and the dependencies recorded in each notebook's PEP 723
+metadata and adjacent lockfile. This is an engineering rehearsal, not a
+completed student pilot.
 
 ## Offline checks
 
@@ -27,8 +27,9 @@ comparison uses the saved training prompt and settings after notebook edits.
 The local marimo editor rendered the CPU lab and reproduced development accuracy
 0.75 and macro-F1 0.7431. HTML exports and cell metadata were inspected across
 all three notebooks for section order, edit points, and collapsed support code.
-No paid requests were submitted for this change. The new configurable ranges
-have offline coverage; the live evidence below covers the original defaults.
+The fresh live checks below exercised the default agent and SFT settings.
+The wider configurable ranges have offline coverage. The first controlled CPU
+experiment changes only `ngram_range`; its candidate keeps `C=1.0`.
 
 ## Live checks
 
@@ -37,26 +38,34 @@ grant access to participants and are not needed to run the supplied examples.
 
 | Check | Evidence | Result |
 | --- | --- | --- |
-| CPU logging | [Baseline](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/f646ba12c7ed), [candidate](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/7ac2a3bdba5f) | Both development evaluations had accuracy 0.75 and macro-F1 0.7431. Predictions, dataset/source evidence, and model artifacts were read back from W&B. |
-| Forge agent baseline | [Run](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/agent-62a458e0e695) | `meta-llama/Llama-3.3-70B-Instruct` completed six scenarios and passed three tool/outcome contracts. Evidence artifacts and Agent Lens messages, tool calls, and token usage were read back. |
-| ARIA handoff and manual edit | [Comparison run](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/agent-47a97a3f6ee9) | ARIA accessed the baseline's saved source, results, and missing-order conversation. Its suggested prompt edit fixed the missing-ID case, while a safety case regressed. The overall score remained three of six. |
-| Serverless SFT training and recovery | [Smoke run](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/sft-smoke-2557077751) | A two-ticket `Qwen/Qwen3.8-27B` job completed and produced checkpoint 1. Recovery from an empty local workspace retrieved the same job, model, and checkpoint IDs without submitting training again. |
-| SFT checkpoint comparison | [Partial comparison](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/eval-smoke-17c68dc734) | CPU and checkpoint 0 predictions completed on the same two development tickets. The trained-checkpoint request returned HTTP 500. Individual requests to both checkpoints succeeded separately, but a complete notebook comparison remains unverified. Partial results and identifiers were retained. |
+| CPU baseline and first controlled edit | [Baseline](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/71c41288a590), [candidate](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/b1b6a4916698) | Both scored 0.75 accuracy and 0.7431 macro-F1 on 16 development tickets. The candidate changed only single words to single words plus two-word phrases. Metrics, prediction evidence, source and model artifacts were read back from W&B. |
+| Agent baseline and missing-ID prompt edit | [Baseline](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/agent-bb32ae5742e3), [candidate](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/agent-93b70bd2751f) | Both completed six scenarios and passed three contracts. The candidate fixed missing-ID handling but regressed on the safety scenario. Saved configurations/results and all 12 conversations' tool names, arguments, and results matched server readback. |
+| ARIA evidence review | [Baseline conversation](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/weave/agents/conversations/0399a3ce-a876-4c22-9edc-2911dadf6723), [candidate conversation](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/weave/agents/conversations/24c03db9-5702-43d2-93cd-44879915d7cc) | ARIA accessed both runs' source/configuration/results artifacts and the actual conversations. It confirmed the missing-ID improvement and safety regression, and noted that one paired run does not establish reliable causality. |
+| Serverless training and recovery | [Smoke training](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/sft-guide-375d167a4f), [model run](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/sft-guide-375d167a4f-model) | Two-ticket Qwen/Qwen3.8-27B training completed and produced checkpoint 1. Recovery from an empty local directory retrieved the same job, model and checkpoint IDs. The checkpoint artifact and recovery snapshot were read back from W&B. No duplicate training job was submitted. |
+| SFT checkpoint comparison | [Incomplete comparison](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/runs/eval-guide-6eec7125f0) | The CPU reference completed. The checkpoint 0 inference request returned HTTP 500, so trained-checkpoint evaluation was not attempted. The saved incomplete record and results artifact matched server readback. This exercise is not verified end to end. |
 
-The ARIA check used the service API. The notebooks themselves provide a copyable
-prompt and project links for students to use in Ask ARIA. This check does not
-establish that a beginner can complete the browser workflow without help.
+### Dashboard tour
 
-The live checks found and fixed compatibility issues: W&B 0.31 no longer
-provides `wandb.util.generate_id`, and ART requires JSONL artifacts to include
-`format` and `num_trajectories` metadata. W&B summary reads also flatten nested
-objects; recovery now uses a scalar JSON snapshot and bounded read retries for
-propagation. Regression tests cover these behaviors.
+- [W&B project workspace](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/workspace): open the CPU run links above for development accuracy, macro-F1, and prediction tables. Its run dashboard rendered those panels in the browser.
+- [Agent Lens overview](https://forge.coreweave.com/agent-lens/wandb/aria-starter-validation): shows conversation activity, tools, latency, model/provider usage, and cost. The overview and conversation list rendered in the browser.
+- [Weave Agents](https://forge.coreweave.com/wandb/wandb/aria-starter-validation/weave/agents): the same agent evidence within the W&B project. Its overview rendered the fresh conversations, token totals and tool activity in the browser. The conversation links above identify the exact missing-ID examples to inspect. This project has zero legacy Weave Calls; these notebooks do not create `weave.Evaluation` runs.
 
-The checkpoint-serving errors were intermittent. The cause has not been
-established. The notebook does not automatically repeat paid requests; its
-error guidance asks the student to inspect the existing job before a deliberate
-new evaluation. No training job was resubmitted to work around serving errors.
+The ARIA check used the service API. The notebooks provide a copyable prompt and
+project links for students to use in Ask ARIA. ARIA's fresh review turn was
+`01a15ed0-b0f3-7820-aec2-c31f6a92e9b6`. This establishes evidence access, not that
+a beginner can complete the browser workflow without help.
+
+Immediately after training, the first comparison attempt read an older remote
+status and stopped before inference. Recovery refreshed the existing record;
+the same unused evaluation ID then reached inference and encountered HTTP 500.
+The notebook's recovery instructions cover this propagation delay. A completed
+training record is not evidence that checkpoint serving works.
+
+Checkpoint-serving errors were also observed on 2026-10-20, including a failed
+trained-checkpoint request. Their cause remains unestablished. The notebook
+does not automatically repeat paid requests, and no training job was resubmitted
+to work around serving errors. Keep the optional SFT limitation visible before
+submission until a complete smoke comparison succeeds.
 
 ## Publication
 
