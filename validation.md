@@ -45,10 +45,13 @@ established. The notebook does not automatically repeat paid requests; its
 error guidance asks the student to inspect the existing job before a deliberate
 new evaluation. No training job was resubmitted to work around serving errors.
 
+## Publication
+
+The standalone package is hosted at [ash0ts/aria-starter](https://github.com/ash0ts/aria-starter).
+The molab links use this repository while organization hosting is pending.
+
 ## Remaining release checks
 
-- Publish to `wandb/aria-starter`. GitHub rejected creation because the current
-  authenticated account lacks repository-creation permission in `wandb`.
 - Open the published molab links, fork with a participant account, and verify
   credential exclusion from forks and exports. No usable browser automation
   surface was available for this check.

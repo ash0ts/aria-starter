@@ -7,9 +7,9 @@ existing ML project or dataset.
 
 | Activity | Open in molab | Python source | Try changing |
 | --- | --- | --- | --- |
-| Train a ticket classifier, no account required | [Open classifier](https://molab.marimo.io/github/wandb/aria-starter/blob/main/train_classifier.py) | [train_classifier.py](train_classifier.py) | Training examples, text features, or model settings |
-| Build a support assistant with Forge Inference and Agent Lens | [Open agent](https://molab.marimo.io/github/wandb/aria-starter/blob/main/build_agent.py) | [build_agent.py](build_agent.py) | The prompt, order and policy tools, or escalation behavior |
-| Fine-tune a language model with Forge serverless training | [Open fine-tuning](https://molab.marimo.io/github/wandb/aria-starter/blob/main/finetune_classifier.py) | [finetune_classifier.py](finetune_classifier.py) | Examples or training settings, then compare against the CPU classifier |
+| Train a ticket classifier, no account required | [Open classifier](https://molab.marimo.io/github/ash0ts/aria-starter/blob/main/train_classifier.py) | [train_classifier.py](train_classifier.py) | Training examples, text features, or model settings |
+| Build a support assistant with Forge Inference and Agent Lens | [Open agent](https://molab.marimo.io/github/ash0ts/aria-starter/blob/main/build_agent.py) | [build_agent.py](build_agent.py) | The prompt, order and policy tools, or escalation behavior |
+| Fine-tune a language model with Forge serverless training | [Open fine-tuning](https://molab.marimo.io/github/ash0ts/aria-starter/blob/main/finetune_classifier.py) | [finetune_classifier.py](finetune_classifier.py) | Examples or training settings, then compare against the CPU classifier |
 
 All tickets, orders, policies, and customers are synthetic. The agent's tools
 simulate support actions; they do not contact customers or change real orders.
@@ -106,7 +106,7 @@ made setup difficult and where ARIA helped or left you stuck.
 See [facilitator notes](facilitator.md) for provisioning and pilot checks, and
 [sources](sources.md) for the examples adapted here and their license notices.
 The [validation record](validation.md) distinguishes completed checks from
-the remaining publication and classroom checks.
+the remaining classroom checks.
 
 The starter is licensed under [Apache-2.0](LICENSE), with retained upstream
 notices in [licenses](licenses).

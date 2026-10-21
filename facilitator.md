@@ -24,7 +24,7 @@ pair them with someone who can help edit a list or dictionary.
 
 ## Share the assignment
 
-The public source is [wandb/aria-starter](https://github.com/wandb/aria-starter).
+The public source is [ash0ts/aria-starter](https://github.com/ash0ts/aria-starter).
 Share the GitHub-backed molab links from its [README](README.md); they open the
 notebooks on `main`. For a cohort, select a release ref and replace `main` in
 the URLs so a later change does not alter the assignment during the session.
