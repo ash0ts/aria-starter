@@ -15,7 +15,7 @@ __generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import inspect
     import json
@@ -31,33 +31,343 @@ def _():
     from dotenv import load_dotenv
     from openai import OpenAI
 
-    load_dotenv(Path.cwd() / ".env", override=False)
+    _environment_loaded = load_dotenv(Path.cwd() / ".env", override=False)
     return OpenAI, Path, inspect, json, mo, os, re, textwrap, tracing, uuid, wandb
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    # Build the Trail Supply support assistant
+    # Build a support assistant
 
-    You maintain a fictional outdoor shop's assistant. It can look up orders,
-    read store policy, and simulate a handoff to a human. All records are supplied.
+    Trail Supply is a **fictional outdoor shop**. Supplied tools look up orders and policies or simulate an escalation.
+    **Learning objective:** explain a tool-use failure and test whether one prompt edit changes the assistant's behavior.
+    **Prerequisites:** basic Python, a facilitator-provided W&B team/project, your API key, Forge Inference credits,
+    and ARIA access. No existing agent or customer data is needed.
 
-    **Run → inspect a mistake → ask ARIA → edit Python → compare.**
+    Follow **run → inspect → ask ARIA → edit → compare**. The tools never change real orders or contact customers.
 
-    Start with the baseline prompt below. Run the prepared questions, then edit
-    `AGENT_PROMPT` or a tool and submit another experiment. The score checks tools
-    and outcomes; read the answer too, because a passing score does not prove
-    every sentence is correct. Escalation contacts nobody.
+    **Run this first:** if outputs are waiting, open marimo's command palette and choose
+    **Run all stale cells** (or **Re-run all cells**) to initialize the lab. This computes
+    local results and creates forms; uploads and paid work still need their submit buttons.
 
-    Add `WANDB_API_KEY` in molab's **Developer panel → Secrets**, then set your
-    team and a project below. Inference spends Forge credits only when you submit
-    **Run agent experiment**. Opening this notebook makes no service calls.
+    **Cell labels:** **Edit here** marks Python you can change; **Run this** marks an action or result; **Supplied implementation** marks provided support code. In the editor, expand collapsed cells with **Show code** (the code icon or cell menu). Opening or editing code does not submit paid work. Keep keys in molab Secrets or an ignored `.env`, never in cells.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 1. Edit here: assistant prompt
+
+    Run the supplied prompt as `baseline` first. For your first edit, focus on **missing-order handling**:
+    when no order ID is supplied, should the assistant ask for it before trying a lookup?
+    Keep inference settings and the number of scenarios fixed while testing that prompt change.
+
+    The response must be a JSON object with `outcome` and `answer`. `outcome` is one of the four values below;
+    `answer` is the customer-facing reply. This **response contract** lets the scorer compare structured behavior.
+    A valid JSON answer can still mislead a customer, so read the answer as well as its score.
     """)
     return
 
 
 @app.cell
+def _():
+    # Edit this cell for your next experiment. Keep the output contract intact.
+    AGENT_PROMPT = """You help customers of Trail Supply, a fictional outdoor shop.
+    Use the available tools to answer questions. Explain the next step concisely.
+    Your final response must be a JSON object with an `outcome` and an `answer`.
+    Outcomes: order_status, ask_order_id, return_eligible, human_escalation.
+    `answer` is the message to the customer. Do not wrap JSON in a code fence.
+    """
+    return (AGENT_PROMPT,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 2. Edit here: inference settings
+
+    `model` must be available in your Forge Inference catalog. `temperature` (0–1) controls sampling variation;
+    keep it at 0 for the first comparison. `max_steps` (1–4) bounds model calls per question, including tool requests.
+    `max_tokens` (64–512) caps each response; too small a value can truncate the JSON answer.
+    These limits bound one submission, not repeated experiments. Keep them fixed for the first prompt experiment.
+    """)
+    return
+
+
+@app.cell
+def _():
+    # Edit here: these values are frozen into each explicitly submitted experiment.
+    AGENT_CONFIG = {
+        "model": "meta-llama/Llama-3.3-70B-Instruct",
+        "temperature": 0,
+        "max_steps": 4,
+        "max_tokens": 512,
+    }
+    return (AGENT_CONFIG,)
+
+
+@app.cell(hide_code=True)
+def _(
+    AGENT_CONFIG,
+    AGENT_PROMPT,
+    AGENT_SCENARIOS,
+    mo,
+    os,
+    run_experiment,
+    set_experiments,
+    set_status,
+    support_tools,
+):
+    def submit_agent_experiment(values):
+        if values is None:
+            return
+        # A callback snapshots the current code/config. Reactive edits never call it.
+        try:
+            report = run_experiment(
+                dict(values), AGENT_PROMPT, dict(support_tools), dict(AGENT_CONFIG)
+            )
+            set_experiments(lambda previous: [*previous, report])
+            evidence = (
+                "Evidence uploaded to W&B."
+                if report["evidence_uploaded"]
+                else "Evidence upload is incomplete. Download the results and inspect the run before submitting again."
+            )
+            set_status(f"{report['status']}: {report['run_id']}. {evidence}")
+        except ValueError as error:
+            set_status(str(error))
+        except Exception as error:
+            set_status(
+                f"{type(error).__name__}: request failed. Check access and credits in Forge before submitting again."
+            )
+
+    agent_form = (
+        mo.md("""
+    ## 3. Run this: baseline or candidate
+
+    {entity} {project}
+
+    {variant} {examples}
+
+    Each question uses the step and token limits in `AGENT_CONFIG` above. Give the first run the name `baseline`, then edit code and name the
+    next run `candidate`. Submitting again intentionally starts a new experiment.
+    """)
+        .batch(
+            entity=mo.ui.text(value=os.getenv("WANDB_ENTITY", ""), label="W&B team"),
+            project=mo.ui.text(
+                value=os.getenv("WANDB_PROJECT", "aria-support-desk"), label="Project"
+            ),
+            variant=mo.ui.text(value="baseline", label="Experiment name"),
+            examples=mo.ui.slider(1, len(AGENT_SCENARIOS), value=2, label="Questions"),
+        )
+        .form(
+            submit_button_label="Run agent experiment",
+            on_change=submit_agent_experiment,
+        )
+    )
+    mo.vstack([mo.md(f"**Selected inference settings:** `{AGENT_CONFIG}`"), agent_form])
+    return agent_form, submit_agent_experiment
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 4. Inspect and ask ARIA
+
+    A scenario specifies required tools and an expected outcome. A **tool contract** checks that the assistant
+    used the right arguments and avoided unsupported actions, such as inventing an order ID or escalating unnecessarily.
+    A pass requires all checks for that scenario. Read each tool's arguments and result in **Agent Lens**, then
+    read the customer answer below. The automated score cannot verify every factual claim.
+
+    If a run is incomplete, keep its ID, inspect access/credits and saved errors, and resolve the failure with your
+    facilitator before discussing model quality. Re-submitting the form intentionally spends credits again.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(get_experiments, get_status, json, mo):
+    _runs = get_experiments()
+    _sections = [mo.md(get_status())]
+    for _run in _runs:
+        _sections.append(
+            mo.md(
+                f"### {_run['variant']}\n[W&B run]({_run['run_url']}) · [Agent Lens]({_run['agent_lens_url']})"
+            )
+        )
+        if _run.get("message"):
+            _sections.append(mo.callout(_run["message"], kind="warn"))
+        if _run.get("errors"):
+            _sections.append(
+                mo.callout(
+                    f"Keep run ID `{_run['run_id']}`. Status: `{json.dumps(_run['errors'])}`. Local record: `{_run['local_record']}`. No automatic retry was submitted.",
+                    kind="warn",
+                )
+            )
+        _sections.append(mo.ui.table(_run["rows"], selection=None))
+    if _runs:
+        _latest = _runs[-1]
+        _baseline = _runs[0]
+        _prompt = (
+            f"I am building the fictional Trail Supply support assistant. Compare {_baseline['run_url']} "
+            f"with {_latest['run_url']}. Read their evaluation artifacts, config, and experiment.py. "
+            f"Saved baseline settings: {json.dumps(_baseline['config'])}. "
+            f"Saved variant settings: {json.dumps(_latest['config'])}. "
+            "Investigate one failed tool/outcome contract. For two runs, compare that same scenario and regressions. "
+            "Explain it using the logged evidence. Suggest one small Python or prompt edit and a test. "
+            "The automated score does not judge every factual claim; also inspect the customer answers. "
+            "Help me state a one-sentence hypothesis for an edit to AGENT_PROMPT, holding AGENT_CONFIG fixed. "
+            "If this is my comparison, does the evidence support that hypothesis? "
+            "Do not launch another paid experiment. I will edit AGENT_PROMPT and explicitly submit a candidate in marimo."
+        )
+        if _latest["status"] != "finished" or not _latest["evidence_uploaded"]:
+            _prompt = (
+                f"Help me diagnose incomplete experiment {_latest['run_url']} using its saved record. "
+                f"Status: {_latest['status']}; errors: {json.dumps(_latest['errors'])}. "
+                "Check access, credits, model availability, and artifact upload before discussing model quality. "
+                "Do not retry paid work. I will inspect the existing run and saved identifiers with my facilitator."
+            )
+        _sections += [
+            mo.md(
+                f"### Copy the ARIA handoff\nOpen [this project]({_latest['project_url']}), click **Ask ARIA**, and paste:"
+            ),
+            mo.ui.text_area(value=_prompt, full_width=True),
+            mo.download(
+                json.dumps(_runs, indent=2),
+                filename="agent-experiments.json",
+                label="Download results",
+            ),
+        ]
+    mo.vstack(_sections)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 5. Ask ARIA, edit, and compare
+
+    **Investigate:** after the baseline, choose the missing-order scenario and inspect its outcome, tool calls,
+    and customer answer. Copy the handoff above into Ask ARIA in the target project. Ask it to explain one failure
+    using the saved `experiment.py`, configuration, and trace.
+
+    **Change:** write a one-sentence hypothesis about what the assistant should do when an order ID is absent.
+    Edit **AGENT_PROMPT** in section 1. Keep **AGENT_CONFIG** and the scenario count unchanged.
+    Return to **Run this: baseline or candidate**, name the next run `candidate`, and click **Run agent experiment**.
+    Editing or rerunning a code cell alone never sends requests.
+
+    **Compare:** check the same missing-order example in both runs, the contract pass rate, and regressions on other
+    scenarios. Ask ARIA with the updated handoff: “Does this evidence support my hypothesis? Did the assistant invent
+    an ID, escalate unnecessarily, or give a worse answer elsewhere?” Keep both result links and your hypothesis.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 6. Extend the exercise
+
+    - Ask ARIA why an unknown order should trigger a handoff rather than a made-up ETA.
+    - Add a tool over `PRODUCTS`, then add a scenario and its expected behavior.
+    - Change the prompt to check return eligibility before promising a refund.
+    - Compare failures on the same scenarios; adding easier questions can inflate the average.
+
+    Record what you changed, what ARIA helped explain, and what remained confusing.
+    Save or download your edited notebook. After a restart, use your W&B run links
+    to recover the durable evidence; the comparison list above belongs to this session.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Edit here: optional tools
+
+    Try this only after a prompt comparison. Each tool has three connected parts:
+    its **Python implementation** returns data, its **schema** tells the model the name and arguments,
+    and an **evaluation scenario** specifies the behavior you expect. The registry maps names to implementations.
+    If you add a product lookup, update all three and the registry. The supplied scenarios are in the collapsed fixtures;
+    keep original scenarios for regression checks and distinguish new ones in your report.
+
+    The functions below simulate actions. An unknown order returns an error the assistant must handle;
+    escalation only returns a fictional receipt. Edit the implementation and schema cells together when changing an interface.
+    """)
+    return
+
+
+@app.cell
+def _(ORDERS, STORE_POLICY):
+    def lookup_order(order_id: str) -> dict:
+        """Find a supplied order, never invent one."""
+        key = order_id.strip().upper()
+        if key not in ORDERS:
+            return {"error": "order_not_found", "order_id": key}
+        return {"order_id": key, **ORDERS[key]}
+
+    def lookup_policy(topic: str) -> dict:
+        """Read returns, missing_order, or safety policy."""
+        if topic not in STORE_POLICY:
+            return {"error": "unknown_policy", "available": list(STORE_POLICY)}
+        return {"topic": topic, "policy": STORE_POLICY[topic]}
+
+    def escalate_to_human(reason: str) -> dict:
+        """Simulate a handoff. This does not send a message or open a real ticket."""
+        return {"simulated": True, "outcome": "human_escalation", "reason": reason}
+
+    support_tools = {
+        "lookup_order": lookup_order,
+        "lookup_policy": lookup_policy,
+        "escalate_to_human": escalate_to_human,
+    }
+    return escalate_to_human, lookup_order, lookup_policy, support_tools
+
+
+@app.cell
+def _():
+    TOOL_SCHEMAS = [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {argument: {"type": "string"}},
+                    "required": [argument],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        for name, argument, description in [
+            ("lookup_order", "order_id", "Look up an order such as TRAIL-1001."),
+            (
+                "lookup_policy",
+                "topic",
+                "Read returns, missing_order, or safety policy.",
+            ),
+            ("escalate_to_human", "reason", "Simulate handing a problem to a human."),
+        ]
+    ]
+    return (TOOL_SCHEMAS,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## Supplied implementation
+
+    Expand a collapsed cell using its **Show code** control (the code icon or cell menu in the editor).
+    These cells contain the fixtures, scoring, uploads, and recovery helpers used above.
+    You can inspect every function. Keep fixtures and scoring fixed during your first comparison.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _():
     # START SHARED FIXTURES
     # All people, tickets, products, orders, and policies below are fictional.
@@ -461,75 +771,7 @@ def _():
     )
 
 
-@app.cell
-def _():
-    # Edit this cell for your next experiment. Keep the output contract intact.
-    AGENT_PROMPT = """You help customers of Trail Supply, a fictional outdoor shop.
-    Use the available tools to answer questions. Explain the next step concisely.
-    Your final response must be a JSON object with an `outcome` and an `answer`.
-    Outcomes: order_status, ask_order_id, return_eligible, human_escalation.
-    `answer` is the message to the customer. Do not wrap JSON in a code fence.
-    """
-    return (AGENT_PROMPT,)
-
-
-@app.cell
-def _(ORDERS, STORE_POLICY):
-    def lookup_order(order_id: str) -> dict:
-        """Find a supplied order, never invent one."""
-        key = order_id.strip().upper()
-        if key not in ORDERS:
-            return {"error": "order_not_found", "order_id": key}
-        return {"order_id": key, **ORDERS[key]}
-
-    def lookup_policy(topic: str) -> dict:
-        """Read returns, missing_order, or safety policy."""
-        if topic not in STORE_POLICY:
-            return {"error": "unknown_policy", "available": list(STORE_POLICY)}
-        return {"topic": topic, "policy": STORE_POLICY[topic]}
-
-    def escalate_to_human(reason: str) -> dict:
-        """Simulate a handoff. This does not send a message or open a real ticket."""
-        return {"simulated": True, "outcome": "human_escalation", "reason": reason}
-
-    support_tools = {
-        "lookup_order": lookup_order,
-        "lookup_policy": lookup_policy,
-        "escalate_to_human": escalate_to_human,
-    }
-    return escalate_to_human, lookup_order, lookup_policy, support_tools
-
-
-@app.cell
-def _():
-    TOOL_SCHEMAS = [
-        {
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {argument: {"type": "string"}},
-                    "required": [argument],
-                    "additionalProperties": False,
-                },
-            },
-        }
-        for name, argument, description in [
-            ("lookup_order", "order_id", "Look up an order such as TRAIL-1001."),
-            (
-                "lookup_policy",
-                "topic",
-                "Read returns, missing_order, or safety policy.",
-            ),
-            ("escalate_to_human", "reason", "Simulate handing a problem to a human."),
-        ]
-    ]
-    return (TOOL_SCHEMAS,)
-
-
-@app.cell
+@app.cell(hide_code=True)
 def _(json, re):
     def score_agent(scenario: dict, result: dict) -> dict:
         """Score observable tool/outcome contracts, not free-text answer quality."""
@@ -630,7 +872,7 @@ def _(json, re):
     return (score_agent,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(TOOL_SCHEMAS, json, tracing, uuid):
     def run_agent(
         message,
@@ -639,6 +881,7 @@ def _(TOOL_SCHEMAS, json, tracing, uuid):
         prompt,
         tools,
         *,
+        temperature=0,
         max_steps=4,
         max_tokens=512,
         conversation_id=None,
@@ -686,13 +929,13 @@ def _(TOOL_SCHEMAS, json, tracing, uuid):
                         system_instructions=[prompt],
                     ) as llm:
                         llm.input_messages = trace_messages(messages)
-                        llm.request_temperature = 0
+                        llm.request_temperature = temperature
                         llm.request_max_tokens = max_tokens
                         completion = client.chat.completions.create(
                             model=model,
                             messages=messages,
                             tools=TOOL_SCHEMAS,
-                            temperature=0,
+                            temperature=temperature,
                             max_tokens=max_tokens,
                         )
                         reply = completion.choices[0].message
@@ -774,7 +1017,7 @@ def _(TOOL_SCHEMAS, json, tracing, uuid):
     return (run_agent,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(os, re):
     def read_destination(entity: str, project: str) -> tuple[str, str]:
         if not os.getenv("WANDB_API_KEY", "").strip():
@@ -794,7 +1037,7 @@ def _(os, re):
     return (read_destination,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     AGENT_SCENARIOS,
     DATASET_SHA256,
@@ -814,27 +1057,31 @@ def _(
     tracing,
     uuid,
     wandb,
+    validate_agent_config,
 ):
-    def run_experiment(settings: dict, prompt: str, tools: dict) -> dict:
+    def run_experiment(
+        settings: dict, prompt: str, tools: dict, configuration: dict
+    ) -> dict:
         """Called only by the submit callback (or an explicit smoke-test script)."""
+        # Freeze and validate editable choices before credentials, files, or services.
+        effective = validate_agent_config(configuration)
         entity, project = read_destination(settings["entity"], settings["project"])
-        model = settings["model"].strip()
-        if not model:
-            raise ValueError("Choose a model from the Forge Inference catalog.")
+        model = effective["model"]
         count = int(settings["examples"])
         if not 1 <= count <= len(AGENT_SCENARIOS):
             raise ValueError("Choose a bounded number of the supplied scenarios.")
         run_id = "agent-" + uuid.uuid4().hex[:12]
         config = {
             **settings,
+            **effective,
             "prompt": prompt,
             "dataset_version": DATASET_VERSION,
             "dataset_sha256": DATASET_SHA256,
-            "max_steps": 4,
-            "max_tokens": 512,
         }
         source = (
-            "AGENT_PROMPT = "
+            "AGENT_CONFIG = "
+            + repr(effective)
+            + "\nAGENT_PROMPT = "
             + repr(prompt)
             + "\nTOOL_SCHEMAS = "
             + repr(TOOL_SCHEMAS)
@@ -925,6 +1172,7 @@ def _(
                                 model,
                                 prompt,
                                 tools,
+                                temperature=config["temperature"],
                                 max_steps=config["max_steps"],
                                 max_tokens=config["max_tokens"],
                                 conversation_id=conversation_id,
@@ -988,139 +1236,39 @@ def _(
     return (run_experiment,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     get_experiments, set_experiments = mo.state([])
     get_status, set_status = mo.state("Ready. No requests have been made.")
     return get_experiments, get_status, set_experiments, set_status
 
 
-@app.cell
-def _(
-    AGENT_PROMPT,
-    AGENT_SCENARIOS,
-    mo,
-    os,
-    run_experiment,
-    set_experiments,
-    set_status,
-    support_tools,
-):
-    def submit_agent_experiment(values):
-        if values is None:
-            return
-        # A callback snapshots the current code/config. Reactive edits never call it.
-        try:
-            report = run_experiment(dict(values), AGENT_PROMPT, dict(support_tools))
-            set_experiments(lambda previous: [*previous, report])
-            evidence = (
-                "Evidence uploaded to W&B."
-                if report["evidence_uploaded"]
-                else "Evidence upload is incomplete. Download the results and inspect the run before submitting again."
-            )
-            set_status(f"{report['status']}: {report['run_id']}. {evidence}")
-        except ValueError as error:
-            set_status(str(error))
-        except Exception as error:
-            set_status(
-                f"{type(error).__name__}: request failed. Check access and credits in Forge before submitting again."
-            )
-
-    agent_form = (
-        mo.md("""
-    ## Run an experiment
-
-    {entity} {project}
-
-    {model} {variant} {examples}
-
-    Each question uses at most four model requests, each capped at 512 output
-    tokens. Give the first run the name `baseline`, then edit code and name the
-    next run `candidate`. Submitting again intentionally starts a new experiment.
-    """)
-        .batch(
-            entity=mo.ui.text(value=os.getenv("WANDB_ENTITY", ""), label="W&B team"),
-            project=mo.ui.text(
-                value=os.getenv("WANDB_PROJECT", "aria-support-desk"), label="Project"
-            ),
-            model=mo.ui.text(
-                value="meta-llama/Llama-3.3-70B-Instruct",
-                label="Forge Inference model",
-                full_width=True,
-            ),
-            variant=mo.ui.text(value="baseline", label="Experiment name"),
-            examples=mo.ui.slider(1, len(AGENT_SCENARIOS), value=2, label="Questions"),
-        )
-        .form(
-            submit_button_label="Run agent experiment",
-            on_change=submit_agent_experiment,
-        )
-    )
-    agent_form
-    return agent_form, submit_agent_experiment
-
-
-@app.cell
-def _(get_experiments, get_status, json, mo):
-    _runs = get_experiments()
-    _sections = [mo.md(get_status())]
-    for _run in _runs:
-        _sections.append(
-            mo.md(
-                f"### {_run['variant']}\n[W&B run]({_run['run_url']}) · [Agent Lens]({_run['agent_lens_url']})"
-            )
-        )
-        if _run.get("message"):
-            _sections.append(mo.callout(_run["message"], kind="warn"))
-        if _run.get("errors"):
-            _sections.append(
-                mo.callout(
-                    f"Keep run ID `{_run['run_id']}`. Status: `{json.dumps(_run['errors'])}`. Local record: `{_run['local_record']}`. No automatic retry was submitted.",
-                    kind="warn",
-                )
-            )
-        _sections.append(mo.ui.table(_run["rows"], selection=None))
-    if _runs:
-        _latest = _runs[-1]
-        _baseline = _runs[0]
-        _prompt = (
-            f"I am building the fictional Trail Supply support assistant. Compare {_baseline['run_url']} "
-            f"with {_latest['run_url']}. Read their evaluation artifacts, config, and experiment.py. "
-            "Find a failed tool/outcome contract or a regression on a shared scenario. "
-            "Explain it using the logged evidence. Suggest one small Python or prompt edit and a test. "
-            "The automated score does not judge every factual claim; also inspect the customer answers. "
-            "Do not launch another paid experiment. I will apply your change in marimo."
-        )
-        _sections += [
-            mo.md(
-                f"## Ask ARIA\nOpen [this project]({_latest['project_url']}), click **Ask ARIA**, and paste:"
-            ),
-            mo.ui.text_area(value=_prompt, full_width=True),
-            mo.download(
-                json.dumps(_runs, indent=2),
-                filename="agent-experiments.json",
-                label="Download results",
-            ),
-        ]
-    mo.vstack(_sections)
-    return
-
-
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ## Make it yours
+def _():
+    def validate_agent_config(configuration):
+        """Copy only supported settings, rejecting invalid values before service calls."""
+        model = configuration.get("model")
+        temperature = configuration.get("temperature")
+        steps = configuration.get("max_steps")
+        tokens = configuration.get("max_tokens")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("AGENT_CONFIG.model must name a Forge Inference model.")
+        if type(temperature) not in (int, float) or not 0 <= temperature <= 1:
+            raise ValueError("AGENT_CONFIG.temperature must be between 0 and 1.")
+        if type(steps) is not int or not 1 <= steps <= 4:
+            raise ValueError("AGENT_CONFIG.max_steps must be an integer from 1 to 4.")
+        if type(tokens) is not int or not 64 <= tokens <= 512:
+            raise ValueError(
+                "AGENT_CONFIG.max_tokens must be an integer from 64 to 512."
+            )
+        return {
+            "model": model.strip(),
+            "temperature": temperature,
+            "max_steps": steps,
+            "max_tokens": tokens,
+        }
 
-    - Ask ARIA why an unknown order should trigger a handoff rather than a made-up ETA.
-    - Add a tool over `PRODUCTS`, then add a scenario and its expected behavior.
-    - Change the prompt to check return eligibility before promising a refund.
-    - Compare failures on the same scenarios; adding easier questions can inflate the average.
-
-    Record what you changed, what ARIA helped explain, and what remained confusing.
-    Save or download your edited notebook. After a restart, use your W&B run links
-    to recover the durable evidence; the comparison list above belongs to this session.
-    """)
-    return
+    return (validate_agent_config,)
 
 
 if __name__ == "__main__":

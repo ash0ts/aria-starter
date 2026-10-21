@@ -1,14 +1,15 @@
 # Validation record
 
-Validated on 2026-10-20 with Python 3.12.13 and the dependencies recorded in
-each notebook's PEP 723 metadata and adjacent lockfile. This is an engineering
-rehearsal, not a completed student pilot.
+Guided-lab changes checked on 2026-10-21 with Python 3.12.13 and the dependencies
+recorded in each notebook's PEP 723 metadata and adjacent lockfile. Live checks
+below were recorded on 2026-10-20, before the guided-lab changes. This is an
+engineering rehearsal, not a completed student pilot.
 
 ## Offline checks
 
 - All three notebooks installed and ran independently in locked uv environments.
 - Notebook parsing, lint, formatting, and HTML export passed.
-- The regression suite passed 39 tests, including fixture parity, family-level
+- The regression suite passed 65 tests, including fixture parity, family-level
   split separation, CPU reproducibility, scoring, and opening notebooks without
   service calls or final-test evaluation.
 - Mocked failures covered missing credentials, unavailable models, rejected
@@ -16,6 +17,18 @@ rehearsal, not a completed student pilot.
   interruption, and interrupted training. Paid requests remained bounded and
   existing remote IDs were retained. These are simulated failure checks, not
   evidence of every live account error.
+
+The guided-lab checks additionally cover exposed agent settings in requests,
+traces, saved configurations, and source artifacts; SFT settings in registration,
+training requests, and saved evidence; invalid bounds rejected before service
+setup; and configuration edits retaining an already submitted job. A checkpoint
+comparison uses the saved training prompt and settings after notebook edits.
+
+The local marimo editor rendered the CPU lab and reproduced development accuracy
+0.75 and macro-F1 0.7431. HTML exports and cell metadata were inspected across
+all three notebooks for section order, edit points, and collapsed support code.
+No paid requests were submitted for this change. The new configurable ranges
+have offline coverage; the live evidence below covers the original defaults.
 
 ## Live checks
 
@@ -53,8 +66,8 @@ The molab links use this repository while organization hosting is pending.
 ## Remaining release checks
 
 - Open the published molab links, fork with a participant account, and verify
-  credential exclusion from forks and exports. No usable browser automation
-  surface was available for this check.
+  credential exclusion from forks and exports. Local editor inspection does
+  not replace this participant-account check.
 - Resolve or revalidate the checkpoint-serving HTTP 500 responses and complete
   the live SFT comparison before treating that exercise as release-ready.
 - Run the facilitator's student walkthrough and collect setup and ARIA feedback

@@ -17,7 +17,7 @@ __generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import copy
     import hashlib
@@ -41,7 +41,7 @@ def _():
     )
     from sklearn.pipeline import Pipeline
 
-    load_dotenv(Path.cwd() / ".env", override=False)
+    _environment_loaded = load_dotenv(Path.cwd() / ".env", override=False)
     return (
         LogisticRegression,
         Path,
@@ -63,28 +63,405 @@ def _():
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md("""
     # Train a support-ticket classifier
 
-    Trail Supply is a **fictional outdoor shop**. Train a small CPU model to send
-    its synthetic support tickets to the right queue. No ML project, API key, or
-    GPU is needed to begin.
+    Trail Supply is a **fictional outdoor shop** with supplied synthetic tickets.
+    **Learning objective:** explain a classification error, make one Python change, and judge its effect.
+    **Prerequisites:** basic Python; no account, GPU, or existing ML project needed for the CPU experiment.
+    Uploads and ARIA require your facilitator's W&B team, your own project, API key, and ARIA access.
 
-    1. Inspect the baseline's development mistakes below.
-    2. Connect your student project, upload the comparison, and ask ARIA about a mistake.
-    3. Edit the candidate's Python settings or add training examples. Compare again.
-    4. When you have chosen a candidate, evaluate the held-out test set once.
+    Follow **run → inspect → ask ARIA → edit → compare**. Improvement is an experimental outcome, not a promise.
 
-    A score can go down after a change. Explain the result rather than chasing a
-    perfect score on this small teaching dataset. Store credentials in molab
-    Secrets or an ignored local `.env` file; never paste keys into code cells.
+    **Run this first:** if outputs are waiting, open marimo's command palette and choose
+    **Run all stale cells** (or **Re-run all cells**) to initialize the lab. This computes
+    local results and creates forms; uploads and paid work still need their submit buttons.
+
+    **Cell labels:** **Edit here** marks Python you can change; **Run this** marks an action or result; **Supplied implementation** marks provided support code. In the editor, expand collapsed cells with **Show code** (the code icon or cell menu). Opening or editing code does not submit paid work. Keep keys in molab Secrets or an ignored `.env`, never in cells.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(DATASET_VERSION, LABELS, TICKETS, mo, train_tickets):
+    mo.vstack(
+        [
+            mo.md(f"""
+        ## 1. Inspect the supplied training data
+
+        Dataset `{DATASET_VERSION}` contains {len(TICKETS)} fictional tickets.
+        Each scenario family stays in one split, including its paraphrases.
+        The labels are `{", ".join(LABELS)}`. A request about a purchase's
+        delivery is `order_status`; a request about an item's features before
+        buying is `product_question`. Safety, privacy, fraud, and requests for
+        human help belong in `human_escalation`.
+
+        You can inspect the fixture cell, but use development errors to guide
+        edits. Do not copy development or test tickets into training.
+        """),
+            mo.ui.table(train_tickets, selection=None, page_size=8),
+        ]
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 2. Edit here: candidate settings
+
+    The **fixed baseline** uses single words, `C=1.0`, and no class weighting. Keep it unchanged.
+    The supplied candidate below already differs in **two** ways: it includes two-word phrases and uses `C=2.0`.
+    Run it once to see a working comparison. For your **first controlled experiment**, copy the baseline values
+    into `CANDIDATE_CONFIG`, then change **only** `ngram_range` to `(1, 2)`. Leave extra examples empty.
+
+    - `ngram_range=(1, 1)` counts single words; `(1, 2)` also counts phrases such as “return window”.
+    - `C` controls how freely the classifier fits the training data. A larger value weakens regularization and can overfit.
+    - `class_weight=None` weights examples equally. `"balanced"` gives more weight to less frequent training labels.
+
+    Change one choice at a time so you can explain the difference. CPU results recompute automatically when you run an edited cell; uploading is a separate action.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    # Supplied implementation: fixed reference, shared with the SFT CPU comparison.
+    BASELINE_CONFIG = {"ngram_range": (1, 1), "C": 1.0, "class_weight": None}
+    return (BASELINE_CONFIG,)
+
+
+@app.cell
+def _():
+    # Edit here: first try C=1.0 so only word phrases differ from the baseline.
+    CANDIDATE_CONFIG = {"ngram_range": (1, 2), "C": 2.0, "class_weight": None}
+    return (CANDIDATE_CONFIG,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Edit here: extra training examples
+
+    Leave this list empty for the first feature experiment. Later, add an original synthetic ticket
+    with a valid label to test a data hypothesis. Do not copy or paraphrase development/test tickets
+    into training. Otherwise the model can memorize the evaluation instead of learning the task.
     """)
     return
 
 
 @app.cell
+def _():
+    # Each entry needs text and one of the four supplied labels.
+    # Example: {"text": "Is the wool hat available in green?", "label": "product_question"}
+    EXTRA_TRAINING_EXAMPLES = []
+    return (EXTRA_TRAINING_EXAMPLES,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 3. Run this: inspect development results
+
+    Both models train automatically on the training split and predict the same development tickets.
+    **Accuracy** is the fraction of correct predictions. **Macro-F1** averages the four labels' F1 scores,
+    giving each label equal weight; F1 balances finding a label's tickets with avoiding false matches.
+    A **confusion matrix** shows which expected labels were predicted as another label.
+
+    Open **Baseline mistakes** and choose one ticket. Read its text, expected label, and predicted label.
+    Check that the intended label makes sense before changing the model.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(baseline_dev, candidate_dev, experiment_id, mo):
+    mo.vstack(
+        [
+            mo.md(
+                f"### Current comparison\n\nExperiment `{experiment_id}`. Higher accuracy and macro-F1 are better."
+            ),
+            mo.ui.table(
+                [
+                    {"model": "baseline", **baseline_dev["metrics"]},
+                    {"model": "candidate", **candidate_dev["metrics"]},
+                ],
+                selection=None,
+            ),
+            mo.accordion(
+                {
+                    "Baseline mistakes": mo.ui.table(
+                        [r for r in baseline_dev["predictions"] if not r["correct"]],
+                        selection=None,
+                    ),
+                    "Candidate mistakes": mo.ui.table(
+                        [r for r in candidate_dev["predictions"] if not r["correct"]],
+                        selection=None,
+                    ),
+                    "Baseline per-class scores": mo.ui.table(
+                        baseline_dev["per_class"], selection=None
+                    ),
+                    "Candidate per-class scores": mo.ui.table(
+                        candidate_dev["per_class"], selection=None
+                    ),
+                    "Baseline confusion matrix (rows actual, columns predicted)": mo.ui.table(
+                        baseline_dev["confusion_matrix"], selection=None
+                    ),
+                    "Candidate confusion matrix (rows actual, columns predicted)": mo.ui.table(
+                        candidate_dev["confusion_matrix"], selection=None
+                    ),
+                }
+            ),
+            mo.md(
+                "Read a misclassified ticket. Is the label clear? Does the model miss a phrase or lack a related training scenario? Ask ARIA for one small change and its rationale."
+            ),
+        ]
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    BASELINE_CONFIG,
+    CANDIDATE_CONFIG,
+    DATASET_SHA256,
+    DATASET_VERSION,
+    EXTRA_TRAINING_EXAMPLES,
+    TICKETS,
+    baseline_dev,
+    baseline_model,
+    candidate_dev,
+    candidate_model,
+    capture_source,
+    copy,
+    experiment_id,
+    get_final_result,
+    mo,
+    os,
+    set_upload_result,
+    upload_comparison,
+):
+    def _upload(values):
+        if values is None:
+            return
+        # This callback runs only for a new submission. Reactive cell execution
+        # creates a form; it never sends a request. Capture results before I/O.
+        snapshot = copy.deepcopy(
+            {
+                "experiment_id": experiment_id,
+                "dataset_version": DATASET_VERSION,
+                "dataset_sha256": DATASET_SHA256,
+                "dataset": TICKETS,
+                "configs": {"baseline": BASELINE_CONFIG, "candidate": CANDIDATE_CONFIG},
+                "extra_training_examples": EXTRA_TRAINING_EXAMPLES,
+                "dev": {"baseline": baseline_dev, "candidate": candidate_dev},
+                "source": capture_source(),
+            }
+        )
+        final = get_final_result()
+        if final is not None and final["experiment_id"] == experiment_id:
+            snapshot["test"] = {name: final[name] for name in ("baseline", "candidate")}
+        try:
+            upload_comparison(
+                snapshot,
+                {
+                    "baseline": copy.deepcopy(baseline_model),
+                    "candidate": copy.deepcopy(candidate_model),
+                },
+                str(values["entity"]),
+                str(values["project"]),
+                set_upload_result,
+            )
+        except ValueError as exc:
+            set_upload_result({"state": "blocked", "error": str(exc)})
+
+    upload_form = mo.ui.dictionary(
+        {
+            "entity": mo.ui.text(
+                label="W&B team", value=os.environ.get("WANDB_ENTITY", "")
+            ),
+            "project": mo.ui.text(
+                label="Your student project", value=os.environ.get("WANDB_PROJECT", "")
+            ),
+        }
+    ).form(submit_button_label="Upload comparison to W&B", on_change=_upload)
+    mo.vstack(
+        [
+            mo.md("""
+        ## 4. Run this: upload evidence for ARIA
+
+        Uploading creates two W&B runs with metrics, predictions, model artifacts,
+        and a snapshot of this notebook and dataset. It does not launch paid training.
+        Every submission creates a new pair of runs. Opening the notebook or editing
+        a cell does not upload anything. Use your facilitator's team and your own
+        project so ARIA can find your experiments.
+        """),
+            upload_form,
+        ]
+    )
+    return (upload_form,)
+
+
+@app.cell(hide_code=True)
+def _(get_upload_result, json, mo):
+    _uploaded = get_upload_result()
+    if _uploaded is not None:
+        if "error" in _uploaded:
+            mo.output.append(mo.callout(_uploaded["error"], kind="warn"))
+        if "run_ids" in _uploaded:
+            mo.output.append(
+                mo.md(
+                    f"Upload: **{_uploaded['state']}**. Retain these run IDs: `{json.dumps(_uploaded['run_ids'])}`."
+                )
+            )
+            for _name, _url in _uploaded["urls"].items():
+                mo.output.append(mo.md(f"[{_name.title()} run]({_url})"))
+        if _uploaded["state"] == "complete":
+            _snapshot = _uploaded["snapshot"]
+            _mistakes = {
+                name: [
+                    r for r in _snapshot["dev"][name]["predictions"] if not r["correct"]
+                ]
+                for name in ("baseline", "candidate")
+            }
+            _prompt = f"""I am learning to classify fictional outdoor-shop support tickets.
+My objective is to understand one failure and test a small change, using development results only.
+Project: {_uploaded["entity"]}/{_uploaded["project"]}
+Baseline: {_uploaded["urls"]["baseline"]} (run {_uploaded["run_ids"]["baseline"]})
+Variant: {_uploaded["urls"]["candidate"]} (run {_uploaded["run_ids"]["candidate"]})
+Dataset: {_snapshot["dataset_version"]} / {_snapshot["dataset_sha256"]}
+Changed settings: {json.dumps(_snapshot["configs"], sort_keys=True)}
+Added training examples: {json.dumps(_snapshot["extra_training_examples"])}
+Observed development failures: {json.dumps(_mistakes)}
+The evidence artifacts contain the exact notebook code, dataset, and comparison results.
+Explain one confusion, suggest one small code or training-data edit and why it might help, and tell me how to compare it against this baseline. Do not use test examples to choose changes."""
+            mo.output.append(
+                mo.md(
+                    "Open either run, go to its project, and choose **Ask ARIA**. Copy this prompt. Apply suggestions yourself in the editable Python cell, then compare and upload again."
+                )
+            )
+            mo.output.append(
+                mo.ui.text_area(
+                    value=_prompt, label="Copy into Ask ARIA", full_width=True, rows=12
+                )
+            )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 5. Ask ARIA, change, and compare
+
+    **Investigate:** after uploading, open Ask ARIA from the linked project and use the copyable prompt above.
+    Ask: “Which training evidence explains this development mistake? Point to the ticket and saved settings.”
+    If the upload is incomplete, inspect its existing run IDs and resolve access/upload errors before asking about quality.
+
+    **Change:** write one sentence: “Adding two-word phrases will help distinguish ___ because ___.”
+    Revisit **Edit here: candidate settings**, copy baseline settings, and change only `ngram_range`.
+    Run that cell; CPU fitting and development results recompute automatically. Keep the extra-examples list empty.
+    Click **Upload comparison to W&B** again to save the new evidence; editing alone does not upload it.
+
+    **Compare:** inspect the targeted ticket, accuracy, macro-F1, and newly wrong tickets. Paste the updated handoff
+    and your hypothesis into ARIA: “Compare these baseline and candidate runs. Did the targeted ticket change,
+    what regressed, and does this evidence support my hypothesis?” Retain both upload links if comparing iterations.
+    A higher aggregate score can hide a worse answer on the ticket you cared about.
+
+    Repeat on development examples. Change examples or class weights only in a later, separate experiment.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    baseline_model,
+    candidate_model,
+    evaluate_classifier,
+    experiment_id,
+    mo,
+    set_final_result,
+    test_tickets,
+):
+    def _evaluate_final(_click):
+        set_final_result(
+            {
+                "experiment_id": experiment_id,
+                "baseline": evaluate_classifier(baseline_model, test_tickets),
+                "candidate": evaluate_classifier(candidate_model, test_tickets),
+            }
+        )
+
+    final_test_button = mo.ui.button(
+        label="Evaluate final test", on_click=_evaluate_final
+    )
+    mo.vstack(
+        [
+            mo.md(
+                "## 6. Run this: final held-out test\n\nChoose your candidate using development results first. This button evaluates held-out scenarios. Once you inspect test errors, the test set is no longer an unbiased guide for further edits."
+            ),
+            final_test_button,
+        ]
+    )
+    return (final_test_button,)
+
+
+@app.cell(hide_code=True)
+def _(experiment_id, get_final_result, mo):
+    _final = get_final_result()
+    if _final is not None:
+        mo.output.append(
+            mo.md(f"Final results for experiment `{_final['experiment_id']}`.")
+        )
+        if _final["experiment_id"] != experiment_id:
+            mo.output.append(
+                mo.callout(
+                    "You edited the candidate after this final evaluation. These results describe the earlier experiment.",
+                    kind="warn",
+                )
+            )
+        mo.output.append(
+            mo.ui.table(
+                [
+                    {"model": name, **_final[name]["metrics"]}
+                    for name in ("baseline", "candidate")
+                ],
+                selection=None,
+            )
+        )
+        mo.output.append(
+            mo.accordion(
+                {
+                    f"{name.title()} test details": mo.vstack(
+                        [
+                            mo.ui.table(
+                                _final[name]["confusion_matrix"], selection=None
+                            ),
+                            mo.ui.table(_final[name]["per_class"], selection=None),
+                            mo.ui.table(_final[name]["predictions"], selection=None),
+                        ]
+                    )
+                    for name in ("baseline", "candidate")
+                }
+            )
+        )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## Supplied implementation
+
+    Expand a collapsed cell using its **Show code** control (the code icon or cell menu in the editor).
+    These cells contain the fixtures, scoring, uploads, and recovery helpers used above.
+    You can inspect every function. Keep fixtures and scoring fixed during your first comparison.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _():
     # START SHARED FIXTURES
     # All people, tickets, products, orders, and policies below are fictional.
@@ -478,7 +855,7 @@ def _():
     return DATASET_SHA256, DATASET_VERSION, LABELS, TICKETS
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(LABELS, TICKETS):
     def validate_tickets(tickets):
         ids = [row["id"] for row in tickets]
@@ -506,44 +883,7 @@ def _(LABELS, TICKETS):
     return dev_tickets, test_tickets, train_tickets, validate_tickets
 
 
-@app.cell
-def _(DATASET_VERSION, LABELS, TICKETS, mo, train_tickets):
-    mo.vstack(
-        [
-            mo.md(f"""
-        ## Read the training data
-
-        Dataset `{DATASET_VERSION}` contains {len(TICKETS)} fictional tickets.
-        Each scenario family stays in one split, including its paraphrases.
-        The labels are `{", ".join(LABELS)}`. A request about a purchase's
-        delivery is `order_status`; a request about an item's features before
-        buying is `product_question`. Safety, privacy, fraud, and requests for
-        human help belong in `human_escalation`.
-
-        You can inspect the fixture cell, but use development errors to guide
-        edits. Do not copy development or test tickets into training.
-        """),
-            mo.ui.table(train_tickets, selection=None, page_size=8),
-        ]
-    )
-    return
-
-
-@app.cell
-def _():
-    # Keep this baseline fixed so experiments remain comparable with the SFT notebook.
-    BASELINE_CONFIG = {"ngram_range": (1, 1), "C": 1.0, "class_weight": None}
-
-    # EDIT HERE. Try (1, 2) word phrases, a different C, or class_weight="balanced".
-    CANDIDATE_CONFIG = {"ngram_range": (1, 2), "C": 2.0, "class_weight": None}
-
-    # Add your own synthetic training scenarios. Do not paraphrase held-out tickets.
-    # Example: {"text": "Is the wool hat available in green?", "label": "product_question"}
-    EXTRA_TRAINING_EXAMPLES = []
-    return BASELINE_CONFIG, CANDIDATE_CONFIG, EXTRA_TRAINING_EXAMPLES
-
-
-@app.cell
+@app.cell(hide_code=True)
 def _(
     LABELS,
     LogisticRegression,
@@ -609,7 +949,7 @@ def _(
     return evaluate_classifier, make_classifier
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     BASELINE_CONFIG,
     CANDIDATE_CONFIG,
@@ -671,135 +1011,14 @@ def _(
     )
 
 
-@app.cell
-def _(baseline_dev, candidate_dev, experiment_id, mo):
-    mo.vstack(
-        [
-            mo.md(
-                f"## Compare development results\n\nExperiment `{experiment_id}`. Higher accuracy and macro-F1 are better."
-            ),
-            mo.ui.table(
-                [
-                    {"model": "baseline", **baseline_dev["metrics"]},
-                    {"model": "candidate", **candidate_dev["metrics"]},
-                ],
-                selection=None,
-            ),
-            mo.accordion(
-                {
-                    "Baseline mistakes": mo.ui.table(
-                        [r for r in baseline_dev["predictions"] if not r["correct"]],
-                        selection=None,
-                    ),
-                    "Candidate mistakes": mo.ui.table(
-                        [r for r in candidate_dev["predictions"] if not r["correct"]],
-                        selection=None,
-                    ),
-                    "Baseline per-class scores": mo.ui.table(
-                        baseline_dev["per_class"], selection=None
-                    ),
-                    "Candidate per-class scores": mo.ui.table(
-                        candidate_dev["per_class"], selection=None
-                    ),
-                    "Baseline confusion matrix (rows actual, columns predicted)": mo.ui.table(
-                        baseline_dev["confusion_matrix"], selection=None
-                    ),
-                    "Candidate confusion matrix (rows actual, columns predicted)": mo.ui.table(
-                        candidate_dev["confusion_matrix"], selection=None
-                    ),
-                }
-            ),
-            mo.md(
-                "Read a misclassified ticket. Is the label clear? Does the model miss a phrase or lack a related training scenario? Ask ARIA for one small change and its rationale."
-            ),
-        ]
-    )
-    return
-
-
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     get_final_result, set_final_result = mo.state(None)
     get_upload_result, set_upload_result = mo.state(None)
     return get_final_result, get_upload_result, set_final_result, set_upload_result
 
 
-@app.cell
-def _(
-    baseline_model,
-    candidate_model,
-    evaluate_classifier,
-    experiment_id,
-    mo,
-    set_final_result,
-    test_tickets,
-):
-    def _evaluate_final(_click):
-        set_final_result(
-            {
-                "experiment_id": experiment_id,
-                "baseline": evaluate_classifier(baseline_model, test_tickets),
-                "candidate": evaluate_classifier(candidate_model, test_tickets),
-            }
-        )
-
-    final_test_button = mo.ui.button(
-        label="Evaluate final test", on_click=_evaluate_final
-    )
-    mo.vstack(
-        [
-            mo.md(
-                "## Final test\n\nChoose your candidate using development results first. This button evaluates held-out scenarios. Once you inspect test errors, the test set is no longer an unbiased guide for further edits."
-            ),
-            final_test_button,
-        ]
-    )
-    return (final_test_button,)
-
-
-@app.cell
-def _(experiment_id, get_final_result, mo):
-    _final = get_final_result()
-    if _final is not None:
-        mo.output.append(
-            mo.md(f"Final results for experiment `{_final['experiment_id']}`.")
-        )
-        if _final["experiment_id"] != experiment_id:
-            mo.output.append(
-                mo.callout(
-                    "You edited the candidate after this final evaluation. These results describe the earlier experiment.",
-                    kind="warn",
-                )
-            )
-        mo.output.append(
-            mo.ui.table(
-                [
-                    {"model": name, **_final[name]["metrics"]}
-                    for name in ("baseline", "candidate")
-                ],
-                selection=None,
-            )
-        )
-        mo.output.append(
-            mo.accordion(
-                {
-                    f"{name.title()} test details": mo.vstack(
-                        [
-                            mo.ui.table(
-                                _final[name]["confusion_matrix"], selection=None
-                            ),
-                            mo.ui.table(_final[name]["per_class"], selection=None),
-                            mo.ui.table(_final[name]["predictions"], selection=None),
-                        ]
-                    )
-                    for name in ("baseline", "candidate")
-                }
-            )
-        )
-    return
-
-
-@app.cell
+@app.cell(hide_code=True)
 def _(Path, inspect, make_classifier, evaluate_classifier):
     def capture_source():
         # No credentials are read here. Keep all secrets out of notebook cells.
@@ -813,7 +1032,7 @@ def _(Path, inspect, make_classifier, evaluate_classifier):
     return (capture_source,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Path, joblib, json, os, tempfile, uuid):
     def upload_comparison(snapshot, models, entity, project, publish_status):
         import wandb
@@ -923,134 +1142,6 @@ def _(Path, joblib, json, os, tempfile, uuid):
         publish_status(dict(status))
 
     return (upload_comparison,)
-
-
-@app.cell
-def _(
-    BASELINE_CONFIG,
-    CANDIDATE_CONFIG,
-    DATASET_SHA256,
-    DATASET_VERSION,
-    EXTRA_TRAINING_EXAMPLES,
-    TICKETS,
-    baseline_dev,
-    baseline_model,
-    candidate_dev,
-    candidate_model,
-    capture_source,
-    copy,
-    experiment_id,
-    get_final_result,
-    mo,
-    os,
-    set_upload_result,
-    upload_comparison,
-):
-    def _upload(values):
-        if values is None:
-            return
-        # This callback runs only for a new submission. Reactive cell execution
-        # creates a form; it never sends a request. Capture results before I/O.
-        snapshot = copy.deepcopy(
-            {
-                "experiment_id": experiment_id,
-                "dataset_version": DATASET_VERSION,
-                "dataset_sha256": DATASET_SHA256,
-                "dataset": TICKETS,
-                "configs": {"baseline": BASELINE_CONFIG, "candidate": CANDIDATE_CONFIG},
-                "extra_training_examples": EXTRA_TRAINING_EXAMPLES,
-                "dev": {"baseline": baseline_dev, "candidate": candidate_dev},
-                "source": capture_source(),
-            }
-        )
-        final = get_final_result()
-        if final is not None and final["experiment_id"] == experiment_id:
-            snapshot["test"] = {name: final[name] for name in ("baseline", "candidate")}
-        try:
-            upload_comparison(
-                snapshot,
-                {
-                    "baseline": copy.deepcopy(baseline_model),
-                    "candidate": copy.deepcopy(candidate_model),
-                },
-                str(values["entity"]),
-                str(values["project"]),
-                set_upload_result,
-            )
-        except ValueError as exc:
-            set_upload_result({"state": "blocked", "error": str(exc)})
-
-    upload_form = mo.ui.dictionary(
-        {
-            "entity": mo.ui.text(
-                label="W&B team", value=os.environ.get("WANDB_ENTITY", "")
-            ),
-            "project": mo.ui.text(
-                label="Your student project", value=os.environ.get("WANDB_PROJECT", "")
-            ),
-        }
-    ).form(submit_button_label="Upload comparison to W&B", on_change=_upload)
-    mo.vstack(
-        [
-            mo.md("""
-        ## Ask ARIA about this experiment
-
-        Uploading creates two W&B runs with metrics, predictions, model artifacts,
-        and a snapshot of this notebook and dataset. It does not launch paid training.
-        Every submission creates a new pair of runs. Opening the notebook or editing
-        a cell does not upload anything. Use your facilitator's team and your own
-        project so ARIA can find your experiments.
-        """),
-            upload_form,
-        ]
-    )
-    return (upload_form,)
-
-
-@app.cell
-def _(get_upload_result, json, mo):
-    _uploaded = get_upload_result()
-    if _uploaded is not None:
-        if "error" in _uploaded:
-            mo.output.append(mo.callout(_uploaded["error"], kind="warn"))
-        if "run_ids" in _uploaded:
-            mo.output.append(
-                mo.md(
-                    f"Upload: **{_uploaded['state']}**. Retain these run IDs: `{json.dumps(_uploaded['run_ids'])}`."
-                )
-            )
-            for _name, _url in _uploaded["urls"].items():
-                mo.output.append(mo.md(f"[{_name.title()} run]({_url})"))
-        if _uploaded["state"] == "complete":
-            _snapshot = _uploaded["snapshot"]
-            _mistakes = {
-                name: [
-                    r for r in _snapshot["dev"][name]["predictions"] if not r["correct"]
-                ]
-                for name in ("baseline", "candidate")
-            }
-            _prompt = f"""I am learning to classify fictional outdoor-shop support tickets.
-My objective is to understand one failure and test a small change, using development results only.
-Project: {_uploaded["entity"]}/{_uploaded["project"]}
-Baseline: {_uploaded["urls"]["baseline"]} (run {_uploaded["run_ids"]["baseline"]})
-Variant: {_uploaded["urls"]["candidate"]} (run {_uploaded["run_ids"]["candidate"]})
-Dataset: {_snapshot["dataset_version"]} / {_snapshot["dataset_sha256"]}
-Changed settings: {json.dumps(_snapshot["configs"], sort_keys=True)}
-Added training examples: {json.dumps(_snapshot["extra_training_examples"])}
-Observed development failures: {json.dumps(_mistakes)}
-The evidence artifacts contain the exact notebook code, dataset, and comparison results.
-Explain one confusion, suggest one small code or training-data edit and why it might help, and tell me how to compare it against this baseline. Do not use test examples to choose changes."""
-            mo.output.append(
-                mo.md(
-                    "Open either run, go to its project, and choose **Ask ARIA**. Copy this prompt. Apply suggestions yourself in the editable Python cell, then compare and upload again."
-                )
-            )
-            mo.output.append(
-                mo.ui.text_area(
-                    value=_prompt, label="Copy into Ask ARIA", full_width=True, rows=12
-                )
-            )
-    return
 
 
 if __name__ == "__main__":

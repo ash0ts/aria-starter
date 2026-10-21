@@ -14,6 +14,7 @@
 # ///
 """Offline contracts for the independently runnable support-desk notebooks."""
 
+import ast
 import asyncio
 import copy
 import io
@@ -550,7 +551,6 @@ def _agent_settings(examples):
     return {
         "entity": "fixture-team",
         "project": "fixture-student",
-        "model": "fixture-model",
         "variant": "baseline",
         "examples": examples,
     }
@@ -573,7 +573,10 @@ def test_unavailable_agent_model_is_blocked_before_paid_calls(
     agent = notebooks["build_agent"]
     state = _experiment_services(monkeypatch, agent, tmp_path, [], available=False)
     result = agent["run_experiment"](
-        _agent_settings(2), agent["AGENT_PROMPT"], agent["support_tools"]
+        _agent_settings(2),
+        agent["AGENT_PROMPT"],
+        agent["support_tools"],
+        {**agent["AGENT_CONFIG"], "model": "fixture-model"},
     )
     assert result["status"] == "blocked"
     assert "unavailable" in result["message"]
@@ -613,7 +616,10 @@ def test_inference_failures_preserve_partial_results_and_ids_without_retry(
         monkeypatch, agent, tmp_path, [*_successful_order_responses(), error]
     )
     result = agent["run_experiment"](
-        _agent_settings(3), agent["AGENT_PROMPT"], agent["support_tools"]
+        _agent_settings(3),
+        agent["AGENT_PROMPT"],
+        agent["support_tools"],
+        {**agent["AGENT_CONFIG"], "model": "fixture-model"},
     )
     assert result["status"] == "needs_attention"
     assert result["errors"] == [{"stage": "inference", "type": error_class}]
@@ -650,7 +656,10 @@ def test_artifact_failure_retains_completed_agent_results(
         artifact_error=ConnectionError("fixture artifact upload interrupted"),
     )
     result = agent["run_experiment"](
-        _agent_settings(1), agent["AGENT_PROMPT"], agent["support_tools"]
+        _agent_settings(1),
+        agent["AGENT_PROMPT"],
+        agent["support_tools"],
+        {**agent["AGENT_CONFIG"], "model": "fixture-model"},
     )
     assert result["status"] == "needs_attention"
     assert result["errors"] == [{"stage": "evidence_upload", "type": "ConnectionError"}]
@@ -997,7 +1006,13 @@ def test_interrupted_sft_preserves_job_and_cannot_resubmit_same_id(
         _wandb_run=None,
         get_inference_name=lambda step: f"fixture-model:step{step}",
     )
-    monkeypatch.setattr(art, "TrainableModel", lambda **kwargs: model)
+    registrations = []
+
+    def register_model(**kwargs):
+        registrations.append(kwargs)
+        return model
+
+    monkeypatch.setattr(art, "TrainableModel", register_model)
     monkeypatch.setattr(
         art.serverless.backend, "ServerlessBackend", lambda **kwargs: backend
     )
@@ -1029,7 +1044,11 @@ def test_interrupted_sft_preserves_job_and_cannot_resubmit_same_id(
     submission = {
         "experiment_id": "sft-interrupted",
         "mode": "Smoke: 2 tickets",
+    }
+    configuration = {
         "base_model": "fixture-model",
+        "learning_rate": 1e-4,
+        "batch_size": 4,
     }
     args = (
         submission,
@@ -1037,7 +1056,8 @@ def test_interrupted_sft_preserves_job_and_cannot_resubmit_same_id(
         sft["DATASET_VERSION"],
         sft["DATASET_SHA256"],
         sft["CLASSIFIER_PROMPT"],
-        "source snapshot",
+        "# source snapshot",
+        configuration,
     )
     first = asyncio.run(sft["train_experiment"](*args))
     assert first["status"] == "needs_recovery"
@@ -1053,7 +1073,24 @@ def test_interrupted_sft_preserves_job_and_cannot_resubmit_same_id(
         json.loads(line)["messages"][-1]["role"] == "assistant"
         for line in training_lines
     )
+    expected_config = dict(configuration)
+    assert first["training_config"] == expected_config
+    assert first["epochs"] == 1
+    assert registrations[0]["base_model"] == expected_config["base_model"]
+    assert create_job.call_args.kwargs["config"] == {
+        "batch_size": 4,
+        "learning_rate": 1e-4,
+        "assistant_turns": "last",
+    }
+    assert (
+        _source_values(uploaded_inputs[0]["experiment.py"])["SFT_CONFIG"]
+        == expected_config
+    )
+    assert published_records[-1]["training_config"] == expected_config
+    # A reactive edit with the same submitted ID must keep the old job and settings.
+    configuration.update(base_model="edited-model", learning_rate=1e-3, batch_size=8)
     second = asyncio.run(sft["train_experiment"](*args))
+    assert second["training_config"] == expected_config
     assert second["job_id"] == first["job_id"]
     assert create_job.await_count == 1
     # A fresh molab workspace loses its local claim, but the remote reservation
@@ -1063,6 +1100,266 @@ def test_interrupted_sft_preserves_job_and_cannot_resubmit_same_id(
     third = asyncio.run(sft["train_experiment"](*args))
     assert third["status"] == "needs_recovery"
     assert create_job.await_count == 1
+
+
+def _source_values(source):
+    """Read captured literal settings without executing notebook or artifact code."""
+    values = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            try:
+                values[node.targets[0].id] = ast.literal_eval(node.value)
+            except (ValueError, TypeError):
+                pass
+    return values
+
+
+@pytest.mark.parametrize("steps", [1, 2])
+def test_agent_editable_settings_reach_requests_traces_and_artifacts(
+    notebooks, monkeypatch, tmp_path, steps
+):
+    agent = notebooks["build_agent"]
+    state = _experiment_services(
+        monkeypatch, agent, tmp_path, _successful_order_responses()
+    )
+    spans = []
+
+    def trace(**kwargs):
+        span = _Trace()
+        spans.append(span)
+        return span
+
+    monkeypatch.setattr(agent["tracing"], "start_conversation", trace)
+    config = {
+        "model": "fixture-model",
+        "temperature": 0.35,
+        "max_steps": steps,
+        "max_tokens": 64,
+    }
+    result = agent["run_experiment"](
+        _agent_settings(1), agent["AGENT_PROMPT"], agent["support_tools"], config
+    )
+    assert len(state.requests) == steps
+    for request in state.requests:
+        assert request["model"] == config["model"]
+        assert request["temperature"] == config["temperature"]
+        assert request["max_tokens"] == config["max_tokens"]
+    assert spans[0].request_temperature == config["temperature"]
+    assert spans[0].request_max_tokens == config["max_tokens"]
+    entries = state.artifacts[0].manifest.entries
+    saved = json.loads(Path(entries["config.json"].local_path).read_text())
+    captured = _source_values(Path(entries["experiment.py"].local_path).read_text())
+    assert captured["AGENT_CONFIG"] == config
+    for key, value in config.items():
+        assert (
+            result["config"][key]
+            == saved[key]
+            == state.run_settings[0]["config"][key]
+            == value
+        )
+    assert result["rows"][0]["error"] == ("step_limit" if steps == 1 else "")
+    config["temperature"] = 1
+    assert result["config"]["temperature"] == 0.35
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("model", " "),
+        ("temperature", -0.1),
+        ("temperature", 1.1),
+        ("temperature", float("nan")),
+        ("temperature", True),
+        ("max_steps", 0),
+        ("max_steps", 5),
+        ("max_steps", 1.5),
+        ("max_tokens", 63),
+        ("max_tokens", 513),
+        ("max_tokens", 64.5),
+    ],
+)
+def test_invalid_agent_settings_fail_before_external_work(
+    notebooks, monkeypatch, key, value
+):
+    agent = notebooks["build_agent"]
+
+    def forbidden(*args):
+        pytest.fail("Invalid configuration reached credential or service setup")
+
+    monkeypatch.setitem(
+        agent["run_experiment"].__globals__, "read_destination", forbidden
+    )
+    config = {**agent["AGENT_CONFIG"], key: value}
+    with pytest.raises(ValueError, match="AGENT_CONFIG"):
+        agent["run_experiment"](
+            _agent_settings(1), agent["AGENT_PROMPT"], agent["support_tools"], config
+        )
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("base_model", ""),
+        ("learning_rate", 0),
+        ("learning_rate", 1.1e-3),
+        ("learning_rate", float("nan")),
+        ("learning_rate", True),
+        ("batch_size", 1),
+        ("batch_size", 3),
+        ("batch_size", 4.0),
+        ("batch_size", True),
+    ],
+)
+def test_invalid_sft_settings_fail_before_external_work(
+    notebooks, monkeypatch, key, value
+):
+    sft = notebooks["finetune_classifier"]
+
+    def forbidden(*args):
+        pytest.fail("Invalid configuration reached credential or service setup")
+
+    monkeypatch.setitem(
+        sft["train_experiment"].__globals__, "connection_settings", forbidden
+    )
+    with pytest.raises(ValueError, match="SFT_CONFIG"):
+        asyncio.run(
+            sft["train_experiment"](
+                {"experiment_id": "invalid", "mode": "Smoke: 2 tickets"},
+                sft["TICKETS"],
+                sft["DATASET_VERSION"],
+                sft["DATASET_SHA256"],
+                sft["CLASSIFIER_PROMPT"],
+                "# source",
+                {**sft["SFT_CONFIG"], key: value},
+            )
+        )
+
+
+@pytest.mark.parametrize("rate,batch", [(1e-6, 2), (1e-3, 8)])
+def test_configuration_endpoints_are_allowed(notebooks, rate, batch):
+    sft = notebooks["finetune_classifier"]
+    config = {**sft["SFT_CONFIG"], "learning_rate": rate, "batch_size": batch}
+    assert sft["validate_sft_config"](config) == config
+    agent = notebooks["build_agent"]
+    for temperature, steps, tokens in [(0, 1, 64), (1, 4, 512)]:
+        config = {
+            **agent["AGENT_CONFIG"],
+            "temperature": temperature,
+            "max_steps": steps,
+            "max_tokens": tokens,
+        }
+        assert agent["validate_agent_config"](config) == config
+
+
+def test_checkpoint_comparison_uses_saved_configuration_after_edits(
+    notebooks, monkeypatch, tmp_path
+):
+    import openai
+
+    sft = notebooks["finetune_classifier"]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("WANDB_API_KEY", "not-a-real-key")
+    settings = {
+        "entity": "fixture-team",
+        "project": "fixture-student",
+        "training_url": "https://example.test/v1",
+    }
+    saved_config = {
+        "base_model": "original-model",
+        "learning_rate": 1e-4,
+        "batch_size": 4,
+    }
+    training = {
+        "status": "complete",
+        "trained_step": 1,
+        "dataset_sha256": sft["DATASET_SHA256"],
+        "dataset_version": sft["DATASET_VERSION"],
+        "mode": "Smoke: 2 tickets",
+        "model_id": "saved-model-id",
+        "prompt": "Saved training prompt",
+        "training_config": saved_config,
+        "settings": settings,
+        "step0_name": "saved-model:step0",
+        "trained_name": "saved-model:step1",
+    }
+    globals_ = sft["compare_checkpoints"].__globals__
+    uploaded, published = [], []
+    monkeypatch.setitem(globals_, "connection_settings", lambda: settings)
+    monkeypatch.setitem(
+        globals_, "read_remote_record", lambda *args: copy.deepcopy(training)
+    )
+    monkeypatch.setitem(
+        globals_,
+        "reserve_remote",
+        lambda settings, identity, record, files: uploaded.append(files),
+    )
+    for name in ("publish_record", "publish_results"):
+        monkeypatch.setitem(
+            globals_,
+            name,
+            lambda settings, identity, record: published.append(copy.deepcopy(record)),
+        )
+    create = AsyncMock(return_value=_completion(content="order_status"))
+
+    class Client:
+        chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", lambda **kwargs: Client())
+    source = "SFT_CONFIG = {'base_model': 'edited-model', 'learning_rate': 0.001, 'batch_size': 8}\nCLASSIFIER_PROMPT = 'Edited prompt'\n"
+    result = asyncio.run(
+        sft["compare_checkpoints"](
+            {
+                "experiment_id": "original-training",
+                "evaluation_id": "saved-evaluation",
+                "split": "dev",
+            },
+            sft["TICKETS"],
+            sft["DATASET_SHA256"],
+            source,
+        )
+    )
+    assert result["status"] == "complete"
+    assert result["training_config"] == saved_config
+    assert result["prompt"] == training["prompt"]
+    assert create.await_count == 4
+    assert {call.kwargs["model"] for call in create.call_args_list} == {
+        "saved-model:step0",
+        "saved-model:step1",
+    }
+    assert all(
+        call.kwargs["messages"][0]["content"] == training["prompt"]
+        for call in create.call_args_list
+    )
+    values = _source_values(uploaded[0]["experiment.py"])
+    assert values["SFT_CONFIG"] == saved_config
+    assert values["CLASSIFIER_PROMPT"] == training["prompt"]
+    assert published[-1]["training_config"] == saved_config
+
+
+def test_sft_configuration_edits_do_not_recreate_submission_identity():
+    # marimo reruns downstream cells when an edit changes one of their references.
+    # The form's ID generator must not be downstream of experiment choices.
+    app = runpy.run_path(str(STARTER / "finetune_classifier.py"))["app"]
+    dependencies = {
+        definition: set(cell._cell.refs)
+        for cell in app._cell_manager.cells()
+        for definition in cell._cell.defs
+    }
+    pending = ["training_form", "suggested_experiment_id"]
+    visited = set()
+    while pending:
+        symbol = pending.pop()
+        if symbol in visited:
+            continue
+        visited.add(symbol)
+        pending.extend(dependencies.get(symbol, ()))
+    assert not visited & {"SFT_CONFIG", "CLASSIFIER_PROMPT", "source_snapshot"}
 
 
 if __name__ == "__main__":

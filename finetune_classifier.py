@@ -27,7 +27,7 @@ __generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import asyncio
     import hashlib
@@ -48,7 +48,7 @@ def _():
     from sklearn.pipeline import make_pipeline
 
     # Local .env is optional; molab Secrets already populate the environment.
-    load_dotenv(Path.cwd() / ".env", override=False)
+    _environment_loaded = load_dotenv(Path.cwd() / ".env", override=False)
     # ART must not discover a different ancestor .env when imported later.
     os.environ["PYTHON_DOTENV_DISABLED"] = "1"
     return (
@@ -72,27 +72,438 @@ def _():
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md("""
     # Fine-tune a support-ticket classifier
 
-    This optional exercise runs **paid Forge training and inference**. First try
-    `train_classifier.py`, which runs on your CPU without an API key.
+    **Learning objective:** compare a CPU classifier, an untrained language-model checkpoint, and a trained checkpoint
+    on the same synthetic Trail Supply tickets. A **checkpoint** is a saved version of model weights: step 0 is before
+    training; the later step contains the training update.
+    **Prerequisites:** basic Python, your facilitator's W&B team/project and API key, Forge serverless training access
+    and credits, and ARIA access. Try the CPU lab first to learn the labels and error analysis.
 
-    1. Submit a smoke run to check access and the training pipeline.
-    2. Compare the CPU classifier, checkpoint 0, and the trained checkpoint.
-    3. Ask ARIA about a mistake, edit the prompt or training examples, and create
-       a new experiment ID. Use development tickets while iterating.
+    Follow **run → inspect → ask ARIA → edit → compare**. A training job finishing does not guarantee improved predictions.
 
-    A smoke run trains on **two tickets for one epoch**. Its scores are a plumbing
-    check. Full training uses the 32 supplied training tickets for one epoch.
-    Small datasets do not guarantee an improvement.
+    **Run this first:** if outputs are waiting, open marimo's command palette and choose
+    **Run all stale cells** (or **Re-run all cells**) to initialize the lab. This computes
+    local results and creates forms; uploads and paid work still need their submit buttons.
+
+    **Cell labels:** **Edit here** marks Python you can change; **Run this** marks an action or result; **Supplied implementation** marks provided support code. In the editor, expand collapsed cells with **Show code** (the code icon or cell menu). Opening or editing code does not submit paid work. Keep keys in molab Secrets or an ignored `.env`, never in cells.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 1. Edit here: classification prompt
+
+    The same prompt is used for training examples and checkpoint evaluation. The model must return exactly one
+    of the four labels, with no explanation. Invalid labels count as wrong predictions; extra prose can therefore lower
+    the score even if its meaning sounds right. Keep the prompt fixed for your first training run.
+    After examining a development failure with ARIA, you can test one clarification here.
     """)
     return
 
 
 @app.cell
+def _(LABELS):
+    # Edit this prompt, then submit a NEW experiment ID. The prompt used for
+    # checkpoint 0 and trained-checkpoint evaluation is saved with the experiment.
+    CLASSIFIER_PROMPT = (
+        "Classify a ticket for a fictional outdoor shop. Reply with exactly one "
+        "of these labels and no explanation: " + ", ".join(LABELS) + ". "
+        "Use human_escalation for fraud, safety, privacy, accessibility, legal "
+        "issues, or a request to speak to a person."
+    )
+    return (CLASSIFIER_PROMPT,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 2. Edit here: training settings
+
+    - `base_model` selects the starting model; your team needs access to it. The default can be supplied through `FORGE_TRAINING_MODEL`.
+    - `learning_rate` controls the size of weight updates. Larger updates can learn faster or damage useful behavior. Allowed: `1e-6` to `1e-3`.
+    - `batch_size` is the number of examples in a training batch. Allowed: `2`, `4`, or `8`. Change it separately from learning rate.
+
+    The submitted configuration is saved with the prompt and data. Recovery and checkpoint comparison use those saved
+    values even if you later edit this cell. The exercise stays at **one pass** through at most **32 training tickets**.
+    **Smoke: 2 tickets** checks the training connection; **Full: 32 tickets** runs the classification exercise.
+    The two smoke tickets are not enough to judge model quality. Start with smoke and review access and costs with your facilitator.
+    """)
+    return
+
+
+@app.cell
+def _(os):
+    # Edit here: keep defaults for the smoke run; change one setting per later hypothesis.
+    SFT_CONFIG = {
+        "base_model": os.getenv("FORGE_TRAINING_MODEL", "Qwen/Qwen3.8-27B"),
+        "learning_rate": 2e-4,
+        "batch_size": 2,
+    }
+    return (SFT_CONFIG,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Serving limitation before you spend credits
+
+    The recorded live rehearsal completed training but the full checkpoint comparison encountered intermittent
+    Forge HTTP 500 serving errors. This lab does **not** resolve that service issue. A complete training job is not
+    proof that both checkpoints can currently serve predictions. See `validation.md` in the repository for the evidence.
+    If serving fails, read the existing job status and consult your facilitator before spending credits on a retry;
+    do not train another model just to repair an inference error.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(SFT_CONFIG, mo):
+    mo.md(f"**Selected training settings:** `{SFT_CONFIG}`")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, uuid):
+    # Keep ID generation independent of editable configuration: an edit must not
+    # create a new submission identity for an already submitted form.
+    suggested_experiment_id = "sft-" + uuid.uuid4().hex[:12]
+    training_form = (
+        mo.md("""
+    ## 3. Run this: submit training
+
+    Set `WANDB_API_KEY`, `WANDB_ENTITY`, and `WANDB_PROJECT` in molab Secrets or
+    an ignored `.env`. Your organizer must enable training and credits.
+    A new experiment ID is required for each deliberate training attempt.
+
+    {experiment_id}
+    {mode}
+
+    Submitting creates one training job. Editing code or rerunning a submitted
+    ID does not submit it again. Keep the experiment ID for recovery.
+
+    If access fails, check the key and team/project permissions with your
+    organizer. If a model is unavailable or credits are exhausted, have the
+    organizer resolve that before starting another ID. A timeout does not mean
+    the remote job stopped; use recovery first.
+    """)
+        .batch(
+            experiment_id=mo.ui.text(
+                value=suggested_experiment_id, label="Experiment ID"
+            ),
+            mode=mo.ui.dropdown(
+                ["Smoke: 2 tickets", "Full: 32 tickets"],
+                value="Smoke: 2 tickets",
+                label="Training size",
+            ),
+        )
+        .form(submit_button_label="Submit paid training")
+    )
+    training_form
+    return suggested_experiment_id, training_form
+
+
+@app.cell(hide_code=True)
+async def _(
+    CLASSIFIER_PROMPT,
+    SFT_CONFIG,
+    DATASET_SHA256,
+    DATASET_VERSION,
+    TICKETS,
+    mo,
+    source_snapshot,
+    train_experiment,
+    training_form,
+):
+    mo.stop(training_form.value is None, mo.md("No training submitted."))
+    training_result = await train_experiment(
+        training_form.value,
+        TICKETS,
+        DATASET_VERSION,
+        DATASET_SHA256,
+        CLASSIFIER_PROMPT,
+        source_snapshot,
+        dict(SFT_CONFIG),
+    )
+    mo.vstack(
+        [
+            mo.md(
+                f"**Status:** {training_result['status']}  \nExperiment: `{training_result['experiment_id']}`"
+            ),
+            mo.json(training_result),
+        ]
+    )
+    return (training_result,)
+
+
+@app.cell(hide_code=True)
+def _(mo, suggested_experiment_id):
+    recovery_form = (
+        mo.md("""
+    ## Recover an interrupted run
+
+    The record is stored in W&B and `.aria-starter/`. molab may discard local
+    files at shutdown. Paste the original experiment ID to read its job status.
+    Recovery never submits training. If an ID is missing after a network failure,
+    ask the facilitator to inspect the run before creating another experiment.
+
+    {experiment_id}
+    """)
+        .batch(
+            experiment_id=mo.ui.text(
+                value=suggested_experiment_id, label="Existing experiment ID"
+            )
+        )
+        .form(submit_button_label="Read existing job status")
+    )
+    recovery_form
+    return (recovery_form,)
+
+
+@app.cell(hide_code=True)
+async def _(mo, recover_experiment, recovery_form):
+    mo.stop(recovery_form.value is None)
+    recovered_result = await recover_experiment(recovery_form.value["experiment_id"])
+    mo.json(recovered_result)
+    return (recovered_result,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### Read the comparison metrics
+
+    **Accuracy** is the fraction of correct labels. **Macro-F1** gives each of the four labels equal weight;
+    F1 balances finding that label's tickets with avoiding false matches. A **confusion matrix** shows expected
+    labels in rows and predictions in columns. Invalid model outputs count as failures.
+    Compare identical tickets across all three models and read individual predictions before drawing conclusions.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, suggested_experiment_id, uuid):
+    evaluation_form = (
+        mo.md("""
+    ## 4. Run this: compare on development tickets
+
+    Smoke evaluation uses the same two development tickets for all three models.
+    Both smoke tickets are order-status questions. Macro-F1 still averages all
+    four labels, with zero for absent classes; these smoke scores are a connection
+    check, not a quality estimate. Full evaluation uses all 16 tickets in the
+    chosen split. It makes at most
+    32 inference requests, each limited to 512 completion tokens, with retries off.
+    The CPU model always uses the full training split.
+
+    Use `dev` while iterating; choose `test` only for your final comparison.
+    Each evaluation ID is submitted once. Use a new ID to deliberately retry.
+
+    {experiment_id}
+    {evaluation_id}
+    {split}
+    """)
+        .batch(
+            experiment_id=mo.ui.text(
+                value=suggested_experiment_id, label="Completed experiment ID"
+            ),
+            evaluation_id=mo.ui.text(
+                value="eval-" + uuid.uuid4().hex[:12], label="Evaluation ID"
+            ),
+            split=mo.ui.dropdown(
+                ["dev", "test"], value="dev", label="Evaluation split"
+            ),
+        )
+        .form(submit_button_label="Submit paid comparison")
+    )
+    evaluation_form
+    return (evaluation_form,)
+
+
+@app.cell(hide_code=True)
+async def _(
+    DATASET_SHA256, TICKETS, compare_checkpoints, evaluation_form, mo, source_snapshot
+):
+    mo.stop(evaluation_form.value is None, mo.md("No comparison submitted."))
+    comparison = await compare_checkpoints(
+        evaluation_form.value, TICKETS, DATASET_SHA256, source_snapshot
+    )
+    _comparison_notice = comparison.get("notice", "")
+    if comparison.get("http_status") == 500:
+        _comparison_notice += (
+            " The checkpoint may still be becoming available. Refresh the existing "
+            "job status, wait, then submit a new evaluation ID if you choose to "
+            "retry. Inference requests are never repeated automatically."
+        )
+    mo.vstack(
+        [
+            mo.md(
+                f"**Comparison status:** {comparison['status']}\n\n{_comparison_notice}"
+            ),
+            mo.ui.table(
+                [
+                    {
+                        "model": name,
+                        **{
+                            key: result[key]
+                            for key in ("accuracy", "macro_f1", "invalid_labels")
+                        },
+                    }
+                    for name, result in comparison["results"].items()
+                ]
+            ),
+            mo.accordion(
+                {
+                    name: mo.vstack(
+                        [
+                            mo.md("**Predictions**"),
+                            mo.ui.table(result["predictions"], selection=None),
+                            mo.md(
+                                "**Confusion matrix**: rows are expected labels; columns are predictions."
+                            ),
+                            mo.ui.table(
+                                [
+                                    {
+                                        "expected": label,
+                                        **dict(
+                                            zip(
+                                                result["confusion_labels"],
+                                                counts,
+                                                strict=True,
+                                            )
+                                        ),
+                                    }
+                                    for label, counts in zip(
+                                        result["confusion_labels"],
+                                        result["confusion_matrix"],
+                                        strict=True,
+                                    )
+                                ],
+                                selection=None,
+                            ),
+                        ]
+                    )
+                    for name, result in comparison["results"].items()
+                }
+            ),
+        ]
+    )
+    return (comparison,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 5. Inspect and ask ARIA
+
+    After a completed development comparison, open one model's prediction table and
+    choose a failed ticket. The handoff below includes the saved configuration and
+    result IDs. Open Ask ARIA from your target project and ask it to explain that
+    failure using the uploaded evidence. For an incomplete run, inspect its status
+    and recover the existing job before asking about model quality.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(comparison, json, mo):
+    failures = {
+        name: [row for row in result["predictions"] if not row["correct"]]
+        for name, result in comparison["results"].items()
+    }
+    aria_prompt = f"""Help me investigate a fictional outdoor-shop ticket classifier.
+Goal: compare CPU TF-IDF/logistic regression, untrained checkpoint 0, and SFT.
+Project: {comparison["settings"]["entity"]}/{comparison["settings"]["project"]}
+Training experiment: {comparison["experiment_id"]}
+Evaluation: {comparison["evaluation_id"]} ({comparison["split"]}, {comparison["mode"]})
+Evaluation status: {comparison["status"]}; completed models: {", ".join(comparison["results"])}
+Dataset: {comparison["dataset_version"]} / {comparison["dataset_sha256"]}
+Trained step: {comparison["trained_step"]}
+Saved training configuration: {json.dumps(comparison.get("training_config", {}))}
+Exact modeling code is in the inputs artifact's experiment.py; the prompt is:
+{comparison["prompt"]}
+Failures: {json.dumps(failures)}
+Investigate one failed development example using the saved runs. Help me state
+a one-sentence hypothesis for one edit to CLASSIFIER_PROMPT or SFT_CONFIG.
+Hold other settings constant. For my next comparison, inspect the targeted
+example, macro-F1, and regressions: does the evidence support the hypothesis?
+Do not assume SFT improved performance. I will edit the named cell in marimo,
+submit a new training experiment ID, then explicitly submit a development comparison.
+"""
+    if comparison["split"] == "test":
+        aria_prompt = (
+            f"Interpret my final held-out comparison {comparison['evaluation_id']}: "
+            f"{comparison.get('run_url', '')}. Training: {comparison['experiment_id']}. "
+            f"Saved settings: {json.dumps(comparison.get('training_config', {}))}. "
+            "Explain the observed scores and limitations using the saved predictions. "
+            "Do not use test mistakes to select another change; any later edit would be test-informed."
+        )
+    if comparison["status"] != "complete":
+        aria_prompt = (
+            f"Help diagnose incomplete evaluation {comparison['evaluation_id']} for training "
+            f"{comparison['experiment_id']}. Status: {comparison['status']}; "
+            f"HTTP status: {comparison.get('http_status')}. Inspect its saved run "
+            f"{comparison.get('run_url', '')} and checkpoint availability before model-quality advice. "
+            "I will read the existing job status first. Do not submit training or inference."
+        )
+    mo.vstack(
+        [
+            mo.md(
+                f"### Copy the ARIA handoff\n\nOpen Ask ARIA in your target project. [Evaluation run]({comparison.get('run_url', '')}). Copy this prompt. For a completed development comparison, follow the change-and-compare checkpoint below. For incomplete work, follow recovery guidance first."
+            ),
+            mo.ui.text_area(
+                value=aria_prompt, label="Copy to ARIA", full_width=True, rows=14
+            ),
+        ]
+    )
+    return (aria_prompt,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## 6. Change one choice and compare again
+
+    **Investigate:** use the handoff above after a completed development comparison. Choose one failed ticket and ask
+    ARIA to point to the prompt, prediction, and saved training configuration. Smoke scores are only a connection check.
+    For incomplete runs, use **Read existing job status** and the recovery guidance before requesting model-quality advice.
+
+    **Change:** state a one-sentence hypothesis. Edit **CLASSIFIER_PROMPT** or one value in **SFT_CONFIG**;
+    hold the other settings, mode, and evaluation split constant. Return to section 3, enter a **new experiment ID**,
+    and click **Submit paid training**. After training completes, enter that ID and a **new evaluation ID** in section 4
+    and click **Submit paid comparison** with `dev`. An edit or reuse of an existing ID cannot submit a second training job.
+
+    **Compare:** give ARIA both training/evaluation IDs and your hypothesis. Ask: “Did the targeted example change?
+    Compare macro-F1, accuracy, invalid labels, and regressions on shared tickets. Does the evidence support my hypothesis?”
+    The copyable prompt describes the current evaluation; keep the previous run link to compare iterations.
+
+    ## 7. Final held-out test
+
+    Only after choosing your candidate on development results, return to the comparison form and select `test` with
+    a fresh evaluation ID. This is an explicit paid comparison. Once you inspect test mistakes, that split is no longer
+    independent evidence for later edits. Label any subsequent changes as informed by the test set.
+    Save your notebook, run links, hypothesis, and one example that explains what changed.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## Supplied implementation
+
+    Expand a collapsed cell using its **Show code** control (the code icon or cell menu in the editor).
+    These cells contain the fixtures, scoring, uploads, and recovery helpers used above.
+    You can inspect every function. Keep fixtures and scoring fixed during your first comparison.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _():
     # START SHARED FIXTURES
     # All people, tickets, products, orders, and policies below are fictional.
@@ -486,20 +897,7 @@ def _():
     return DATASET_SHA256, DATASET_VERSION, LABELS, TICKETS
 
 
-@app.cell
-def _(LABELS):
-    # Edit this prompt, then submit a NEW experiment ID. The prompt used for
-    # checkpoint 0 and trained-checkpoint evaluation is saved with the experiment.
-    CLASSIFIER_PROMPT = (
-        "Classify a ticket for a fictional outdoor shop. Reply with exactly one "
-        "of these labels and no explanation: " + ", ".join(LABELS) + ". "
-        "Use human_escalation for fraud, safety, privacy, accessibility, legal "
-        "issues, or a request to speak to a person."
-    )
-    return (CLASSIFIER_PROMPT,)
-
-
-@app.cell
+@app.cell(hide_code=True)
 def _(LogisticRegression, TfidfVectorizer, make_pipeline):
     def fit_cpu_classifier(training_rows):
         """The same baseline as train_classifier.py; fit on training data only."""
@@ -516,7 +914,7 @@ def _(LogisticRegression, TfidfVectorizer, make_pipeline):
     return (fit_cpu_classifier,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(LABELS, accuracy_score, confusion_matrix, f1_score):
     def score_predictions(rows, raw_predictions):
         """Invalid labels remain incorrect and get their own confusion column."""
@@ -560,7 +958,7 @@ def _(LABELS, accuracy_score, confusion_matrix, f1_score):
     return (score_predictions,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Path, hashlib, json, os, re):
     def connection_settings():
         """Read keys only at submission. Never put a key into a notebook cell."""
@@ -641,7 +1039,7 @@ def _(Path, hashlib, json, os, re):
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Path, json, os, time):
     def reserve_remote(settings, identity, record, files):
         """resume='never' rejects the same ID after local/molab storage is lost."""
@@ -762,7 +1160,7 @@ def _(Path, json, os, time):
     return publish_record, publish_results, read_remote_record, reserve_remote
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(asyncio, time):
     async def wait_for_training(client, job_id, seconds=1200):
         """Only poll an existing job. A timeout never creates another job."""
@@ -784,7 +1182,7 @@ def _(asyncio, time):
     return (wait_for_training,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     claim_submission,
     connection_settings,
@@ -796,17 +1194,19 @@ def _(
     save_local,
     validate_identity,
     wait_for_training,
+    validate_sft_config,
 ):
-    async def train_experiment(submission, tickets, version, checksum, prompt, source):
+    async def train_experiment(
+        submission, tickets, version, checksum, prompt, source, configuration
+    ):
         """One explicit submission, one remote job, and a durable recovery record."""
+        effective = validate_sft_config(configuration)
         settings = connection_settings()
         identity = validate_identity(submission["experiment_id"].strip())
         model_name = identity + "-model"
         if submission["mode"] not in ("Smoke: 2 tickets", "Full: 32 tickets"):
             raise ValueError("Choose a smoke or full run.")
-        base_model = submission["base_model"].strip()
-        if not base_model:
-            raise ValueError("Choose a base model available to your Forge team.")
+        base_model = effective["base_model"]
         rows = [dict(row) for row in tickets if row["split"] == "train"]
         if submission["mode"].startswith("Smoke"):
             rows = rows[:2]
@@ -822,8 +1222,9 @@ def _(
             "prompt": prompt,
             "training_rows": rows,
             "epochs": 1,
-            "batch_size": 2,
-            "learning_rate": 2e-4,
+            "batch_size": effective["batch_size"],
+            "learning_rate": effective["learning_rate"],
+            "training_config": dict(effective),
             "mode": submission["mode"],
             "status": "reserved",
         }
@@ -859,7 +1260,12 @@ def _(
                 {
                     "train.jsonl": "\n".join(lines) + "\n",
                     "dataset.json": json.dumps(tickets, indent=2),
-                    "experiment.py": source,
+                    "experiment.py": source
+                    + "\n# Effective values captured at submission.\nSFT_CONFIG = "
+                    + repr(effective)
+                    + "\nCLASSIFIER_PROMPT = "
+                    + repr(prompt)
+                    + "\n",
                 },
             )
             remote_reserved = True
@@ -895,8 +1301,8 @@ def _(
                 model_id=model.id,
                 training_data_url=record["training_data_url"],
                 config={
-                    "batch_size": 2,
-                    "learning_rate": 2e-4,
+                    "batch_size": record["batch_size"],
+                    "learning_rate": record["learning_rate"],
                     "assistant_turns": "last",
                 },
             )
@@ -947,7 +1353,7 @@ def _(
     return (train_experiment,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     connection_settings,
     os,
@@ -1013,7 +1419,7 @@ def _(
     return (recover_experiment,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     claim_submission,
     connection_settings,
@@ -1061,6 +1467,13 @@ def _(
             "model_id": training["model_id"],
             "trained_step": training["trained_step"],
             "prompt": training["prompt"],
+            "training_config": training.get(
+                "training_config",
+                {
+                    key: training.get(key)
+                    for key in ("base_model", "learning_rate", "batch_size")
+                },
+            ),
             "status": "reserved",
             "results": {},
             "completion_token_limit": 512,
@@ -1081,7 +1494,12 @@ def _(
                 record,
                 {
                     "evaluation.json": json.dumps(rows, indent=2),
-                    "experiment.py": source,
+                    "experiment.py": source
+                    + "\n# Evaluate the saved training experiment, even after notebook edits.\nSFT_CONFIG = "
+                    + repr(record["training_config"])
+                    + "\nCLASSIFIER_PROMPT = "
+                    + repr(record["prompt"])
+                    + "\n",
                 },
             )
             remote_reserved = True
@@ -1146,9 +1564,10 @@ def _(
     return (compare_checkpoints,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     CLASSIFIER_PROMPT,
+    SFT_CONFIG,
     compare_checkpoints,
     fit_cpu_classifier,
     inspect,
@@ -1160,6 +1579,8 @@ def _(
     source_snapshot = (
         "CLASSIFIER_PROMPT = "
         + repr(CLASSIFIER_PROMPT)
+        + "\nSFT_CONFIG = "
+        + repr(SFT_CONFIG)
         + "\n\n"
         + textwrap.dedent(inspect.getsource(fit_cpu_classifier))
         + "\n\n"
@@ -1172,254 +1593,22 @@ def _(
     return (source_snapshot,)
 
 
-@app.cell
-def _(mo, os, uuid):
-    suggested_experiment_id = "sft-" + uuid.uuid4().hex[:12]
-    training_form = (
-        mo.md("""
-    ## 1. Train
+@app.cell(hide_code=True)
+def _():
+    def validate_sft_config(configuration):
+        """Freeze bounded teaching settings before reserving or submitting work."""
+        model = configuration.get("base_model")
+        rate = configuration.get("learning_rate")
+        batch = configuration.get("batch_size")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("SFT_CONFIG.base_model must name a Forge training model.")
+        if type(rate) not in (int, float) or not 1e-6 <= rate <= 1e-3:
+            raise ValueError("SFT_CONFIG.learning_rate must be between 1e-6 and 1e-3.")
+        if type(batch) is not int or batch not in (2, 4, 8):
+            raise ValueError("SFT_CONFIG.batch_size must be 2, 4, or 8.")
+        return {"base_model": model.strip(), "learning_rate": rate, "batch_size": batch}
 
-    Set `WANDB_API_KEY`, `WANDB_ENTITY`, and `WANDB_PROJECT` in molab Secrets or
-    an ignored `.env`. Your organizer must enable training and credits.
-    A new experiment ID is required for each deliberate training attempt.
-
-    {experiment_id}
-    {base_model}
-    {mode}
-
-    Submitting creates one training job. Editing code or rerunning a submitted
-    ID does not submit it again. Keep the experiment ID for recovery.
-
-    If access fails, check the key and team/project permissions with your
-    organizer. If a model is unavailable or credits are exhausted, have the
-    organizer resolve that before starting another ID. A timeout does not mean
-    the remote job stopped; use recovery first.
-    """)
-        .batch(
-            experiment_id=mo.ui.text(
-                value=suggested_experiment_id, label="Experiment ID"
-            ),
-            base_model=mo.ui.text(
-                value=os.getenv("FORGE_TRAINING_MODEL", "Qwen/Qwen3.8-27B"),
-                label="Base model",
-                full_width=True,
-            ),
-            mode=mo.ui.dropdown(
-                ["Smoke: 2 tickets", "Full: 32 tickets"],
-                value="Smoke: 2 tickets",
-                label="Training size",
-            ),
-        )
-        .form(submit_button_label="Submit paid training")
-    )
-    training_form
-    return suggested_experiment_id, training_form
-
-
-@app.cell
-async def _(
-    CLASSIFIER_PROMPT,
-    DATASET_SHA256,
-    DATASET_VERSION,
-    TICKETS,
-    mo,
-    source_snapshot,
-    train_experiment,
-    training_form,
-):
-    mo.stop(training_form.value is None, mo.md("No training submitted."))
-    training_result = await train_experiment(
-        training_form.value,
-        TICKETS,
-        DATASET_VERSION,
-        DATASET_SHA256,
-        CLASSIFIER_PROMPT,
-        source_snapshot,
-    )
-    mo.vstack(
-        [
-            mo.md(
-                f"**Status:** {training_result['status']}  \nExperiment: `{training_result['experiment_id']}`"
-            ),
-            mo.json(training_result),
-        ]
-    )
-    return (training_result,)
-
-
-@app.cell
-def _(mo, suggested_experiment_id):
-    recovery_form = (
-        mo.md("""
-    ## Recover an interrupted run
-
-    The record is stored in W&B and `.aria-starter/`. molab may discard local
-    files at shutdown. Paste the original experiment ID to read its job status.
-    Recovery never submits training. If an ID is missing after a network failure,
-    ask the facilitator to inspect the run before creating another experiment.
-
-    {experiment_id}
-    """)
-        .batch(
-            experiment_id=mo.ui.text(
-                value=suggested_experiment_id, label="Existing experiment ID"
-            )
-        )
-        .form(submit_button_label="Read existing job status")
-    )
-    recovery_form
-    return (recovery_form,)
-
-
-@app.cell
-async def _(mo, recover_experiment, recovery_form):
-    mo.stop(recovery_form.value is None)
-    recovered_result = await recover_experiment(recovery_form.value["experiment_id"])
-    mo.json(recovered_result)
-    return (recovered_result,)
-
-
-@app.cell
-def _(mo, suggested_experiment_id, uuid):
-    evaluation_form = (
-        mo.md("""
-    ## 2. Compare
-
-    Smoke evaluation uses the same two development tickets for all three models.
-    Both smoke tickets are order-status questions. Macro-F1 still averages all
-    four labels, with zero for absent classes; these smoke scores are a connection
-    check, not a quality estimate. Full evaluation uses all 16 tickets in the
-    chosen split. It makes at most
-    32 inference requests, each limited to 512 completion tokens, with retries off.
-    The CPU model always uses the full training split.
-
-    Use `dev` while iterating; choose `test` only for your final comparison.
-    Each evaluation ID is submitted once. Use a new ID to deliberately retry.
-
-    {experiment_id}
-    {evaluation_id}
-    {split}
-    """)
-        .batch(
-            experiment_id=mo.ui.text(
-                value=suggested_experiment_id, label="Completed experiment ID"
-            ),
-            evaluation_id=mo.ui.text(
-                value="eval-" + uuid.uuid4().hex[:12], label="Evaluation ID"
-            ),
-            split=mo.ui.dropdown(
-                ["dev", "test"], value="dev", label="Evaluation split"
-            ),
-        )
-        .form(submit_button_label="Submit paid comparison")
-    )
-    evaluation_form
-    return (evaluation_form,)
-
-
-@app.cell
-async def _(
-    DATASET_SHA256, TICKETS, compare_checkpoints, evaluation_form, mo, source_snapshot
-):
-    mo.stop(evaluation_form.value is None, mo.md("No comparison submitted."))
-    comparison = await compare_checkpoints(
-        evaluation_form.value, TICKETS, DATASET_SHA256, source_snapshot
-    )
-    _comparison_notice = comparison.get("notice", "")
-    if comparison.get("http_status") == 500:
-        _comparison_notice += (
-            " The checkpoint may still be becoming available. Refresh the existing "
-            "job status, wait, then submit a new evaluation ID if you choose to "
-            "retry. Inference requests are never repeated automatically."
-        )
-    mo.vstack(
-        [
-            mo.md(
-                f"**Comparison status:** {comparison['status']}\n\n{_comparison_notice}"
-            ),
-            mo.ui.table(
-                [
-                    {
-                        "model": name,
-                        **{
-                            key: result[key]
-                            for key in ("accuracy", "macro_f1", "invalid_labels")
-                        },
-                    }
-                    for name, result in comparison["results"].items()
-                ]
-            ),
-            mo.accordion(
-                {
-                    name: mo.vstack(
-                        [
-                            mo.md("**Predictions**"),
-                            mo.ui.table(result["predictions"], selection=None),
-                            mo.md(
-                                "**Confusion matrix**: rows are expected labels; columns are predictions."
-                            ),
-                            mo.ui.table(
-                                [
-                                    {
-                                        "expected": label,
-                                        **dict(
-                                            zip(
-                                                result["confusion_labels"],
-                                                counts,
-                                                strict=True,
-                                            )
-                                        ),
-                                    }
-                                    for label, counts in zip(
-                                        result["confusion_labels"],
-                                        result["confusion_matrix"],
-                                        strict=True,
-                                    )
-                                ],
-                                selection=None,
-                            ),
-                        ]
-                    )
-                    for name, result in comparison["results"].items()
-                }
-            ),
-        ]
-    )
-    return (comparison,)
-
-
-@app.cell
-def _(comparison, json, mo):
-    failures = {
-        name: [row for row in result["predictions"] if not row["correct"]]
-        for name, result in comparison["results"].items()
-    }
-    aria_prompt = f"""Help me investigate a fictional outdoor-shop ticket classifier.
-Goal: compare CPU TF-IDF/logistic regression, untrained checkpoint 0, and SFT.
-Project: {comparison["settings"]["entity"]}/{comparison["settings"]["project"]}
-Training experiment: {comparison["experiment_id"]}
-Evaluation: {comparison["evaluation_id"]} ({comparison["split"]}, {comparison["mode"]})
-Evaluation status: {comparison["status"]}; completed models: {", ".join(comparison["results"])}
-Dataset: {comparison["dataset_version"]} / {comparison["dataset_sha256"]}
-Trained step: {comparison["trained_step"]}
-Exact modeling code is in the inputs artifact's experiment.py; the prompt is:
-{comparison["prompt"]}
-Failures: {json.dumps(failures)}
-Explain one failure using the saved runs. Suggest one change to the prompt or
-training examples, and a development-set comparison. Do not assume SFT improved
-performance. I will apply the edit in marimo and submit a new experiment ID.
-"""
-    mo.vstack(
-        [
-            mo.md(
-                f"## 3. Ask ARIA\n\nOpen Ask ARIA in your target project. [Evaluation run]({comparison.get('run_url', '')}). Copy this prompt, then edit a Python cell and create a new experiment ID."
-            ),
-            mo.ui.text_area(
-                value=aria_prompt, label="Copy to ARIA", full_width=True, rows=14
-            ),
-        ]
-    )
-    return (aria_prompt,)
+    return (validate_sft_config,)
 
 
 if __name__ == "__main__":

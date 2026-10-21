@@ -18,7 +18,9 @@ simulate support actions; they do not contact customers or change real orders.
 
 **In your browser:** use an Open in molab link above, then fork the notebook into
 your own molab workspace. The Python cells are editable. Each fork needs your
-own credentials for connected activities.
+own credentials for connected activities. If outputs are waiting, open marimo's
+command palette and choose **Run all stale cells** (or **Re-run all cells**).
+This initializes the lab; it does not upload results or submit paid work.
 
 **On your computer:** install [uv](https://docs.astral.sh/uv/getting-started/installation/),
 open a terminal in this directory, and run:
@@ -58,6 +60,26 @@ Smart features enabled. Inference and training also require access and credits.
 Your facilitator should provision these before the activity. See the
 [ARIA prerequisites](https://docs.coreweave.com/products/aria).
 
+## Follow the guided lab
+
+Each notebook has numbered sections and three cell labels: **Edit here** for
+experiment choices, **Run this** for actions and results, and **Supplied
+implementation** for provided code. Expand collapsed cells with **Show code**
+(the code icon or cell menu in the editor) to inspect fixtures, scoring, logging,
+and recovery. Those helpers remain ordinary Python.
+
+| Notebook | Visible edit points | First controlled change |
+| --- | --- | --- |
+| CPU classifier | `CANDIDATE_CONFIG`, `EXTRA_TRAINING_EXAMPLES` | Copy the fixed baseline values, then change only `ngram_range` to `(1, 2)`. The supplied candidate also changes `C`, so reset it to `1.0` for this experiment. |
+| Support agent | `AGENT_PROMPT`, `AGENT_CONFIG`, optional tools and schemas | Clarify what to do when an order ID is missing; hold inference settings and scenarios constant. |
+| Optional SFT | `CLASSIFIER_PROMPT`, `SFT_CONFIG` | After a successful comparison, test one prompt clarification or one training setting. |
+
+The configuration cells are the source of truth for model and training settings.
+Submission forms show the selected settings and collect experiment identifiers
+and evaluation choices. Editing CPU choices recomputes local results. Uploads,
+agent inference, training, and checkpoint comparisons each require their own
+explicit action. Recovery uses the original saved configuration after edits.
+
 ## Run an experiment
 
 1. Run the baseline and read a failed prediction or conversation. The classifier
@@ -66,12 +88,12 @@ Your facilitator should provision these before the activity. See the
 2. Upload the comparison when offered, then open its project link and click
    **Ask ARIA**. Paste the notebook's handoff prompt. It identifies the runs,
    relevant code, and mistakes for ARIA to investigate.
-3. Ask for one change you can explain. For example: “Why does this model confuse
+3. State a one-sentence hypothesis and ask for one change you can explain. For example: “Why does this model confuse
    returns with escalation? Point to an example and suggest one change to my
    Python code.”
 4. Apply the change in a visible Python cell and run the comparison again. Read
    the examples as well as the aggregate score. Record what improved and what
-   became worse.
+   became worse. Ask ARIA whether the evidence supports your hypothesis.
 5. For classification, finish experimenting before evaluating the held-out test
    examples once. Keep your notebook and result links for the discussion.
 
@@ -91,6 +113,12 @@ paid comparison** to compare the CPU baseline, untrained checkpoint, and trained
 checkpoint. Use **Full: 32 tickets** only after reviewing the settings with your
 facilitator. Save the experiment ID before leaving a session. After a failure,
 use **Read existing job status** with that ID before considering a new attempt.
+
+The current live validation completed SFT training but encountered intermittent
+HTTP 500 errors while serving the checkpoint comparison. The notebook calls out
+this limitation before submission. See the [validation record](validation.md);
+inspect incomplete runs and recover their status before asking ARIA about model
+quality or choosing a paid retry.
 
 ## Keep your work
 

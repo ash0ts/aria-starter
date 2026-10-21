@@ -36,6 +36,36 @@ and [sources.md](sources.md) when making a copy of the starter.
 
 The URL shape and fork workflow come from [marimo's educator guide](https://molab.marimo.io/for-educators).
 
+## Teach the edit points
+
+Show students how to expand a collapsed cell with **Show code** in the editor.
+The **Supplied implementation** section contains inspectable data and helpers;
+start with the visible **Edit here** cells and the numbered **Run this** actions.
+Do not ask beginners to navigate the upload or recovery implementation to change
+an experiment.
+
+For the CPU lab, explain that the supplied candidate changes both phrase length
+and `C`. For a controlled first experiment, copy baseline values, change only
+`ngram_range` to `(1, 2)`, and leave extra examples empty. Explain regularization
+and class weighting before suggesting either as a later experiment.
+
+For the agent lab, start with missing-order handling in `AGENT_PROMPT`. Keep
+`AGENT_CONFIG` and scenario count constant. A later tool exercise must update
+the implementation, schema, registry, and evaluation scenario together.
+
+For SFT, keep `CLASSIFIER_PROMPT` and `SFT_CONFIG` unchanged for the smoke run.
+Explain that checkpoint 0 precedes training and a later checkpoint contains the
+update. Smoke scores check execution, not quality. Review the visible serving
+limitation before paid work; an incomplete comparison is not evidence that
+training improved or worsened predictions.
+
+At each ARIA checkpoint, ask students to identify one failed example, state a
+one-sentence hypothesis, name the exact cell they will edit, and predict what
+should change. After the next comparison, ask about that example, aggregate
+metrics, and regressions. CPU edits recompute locally; saving evidence still
+requires **Upload comparison to W&B**. Agent and SFT actions require explicit
+paid submissions. A repeated SFT ID retains the original job and settings.
+
 ## Run the activity
 
 Ask students to choose a question they can judge themselves: “Did the assistant
@@ -52,8 +82,10 @@ labels and fixed evaluation examples as the CPU exercise. Start SFT with
 **Full: 32 tickets** for the complete classification exercise. Both train for
 one pass through the selected data. Submit evaluation separately after training.
 
-Each agent question allows at most four model requests, capped at 512 output
-tokens each. An SFT comparison allows up to 512 completion tokens per request,
+The agent configuration allows 1–4 model requests per question, a temperature
+from 0–1, and 64–512 output tokens per request. Defaults remain four requests,
+temperature 0, and 512 output tokens. SFT allows learning rates from `1e-6`
+through `1e-3` and batch sizes 2, 4, or 8; defaults remain `2e-4` and 2. An SFT comparison allows up to 512 completion tokens per request,
 with two model checkpoints evaluated on two tickets in smoke mode or the
 selected development/test split in full mode. These caps bound an attempt;
 repeated deliberate submissions consume additional credits.
@@ -64,10 +96,11 @@ editing. If ARIA cannot see a result, confirm the project and run links in the
 handoff instead of asking the student to describe the whole experiment again.
 Students apply edits in marimo themselves.
 
-Before the final comparison, have students state their hypothesis in one
+Before each development edit, have students state their hypothesis in one
 sentence. Use the held-out test split only after their last development change.
-The final discussion should include a failure that remained, even if the
-aggregate score improved.
+Reading test errors makes later edits informed by that test set; explain why
+it no longer provides an independent final assessment. The final discussion
+should include a failure that remained, even if the aggregate score improved.
 
 ## Rehearse before inviting a cohort
 
